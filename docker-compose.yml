@@ -61,6 +61,53 @@ services:
       retries: 10
       start_period: 10s
 
+  flink-jobmanager:
+    image: flink:1.20.1-scala_2.12-java17
+    container_name: retail-flink-jobmanager
+    restart: unless-stopped
+    command: jobmanager
+
+    ports:
+      - "8081:8081"
+
+    environment:
+      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager"
+
+    volumes:
+      - ./flink/jobs:/opt/flink/jobs
+
+    healthcheck:
+      test: ["CMD-SHELL",
+             "curl -f http://localhost:8081/overview > /dev/null 2>&1 || exit 1" 
+             ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  flink-taskmanager:
+    image: flink:1.20.1-scala_2.12-java17
+    container_name: retail-flink-taskmanager
+    restart: unless-stopped
+    command: taskmanager
+    depends_on: 
+      flink-jobmanager:
+        condition: service_healthy
+
+    environment:
+      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager\ntaskmanager.numberOfTaskSlots: 2"
+
+    volumes: 
+      - ./flink/jobs:/opt/flink/jobs
+
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'org.apache.flink.runtime.taskexecutor.TaskManagerRunner' > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+
 volumes:
   postgres_data:
   kafka_data:
