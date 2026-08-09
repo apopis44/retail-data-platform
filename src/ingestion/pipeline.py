@@ -1,8 +1,10 @@
-import csv
 from .config import DATA_DIR
 from .loaders import load_csv
 from .postgres import get_connection
-from src.ingestion.validations import validate_row_counts
+from src.ingestion.validations import validation_snapshot
+
+
+
 CUSTOMER_COLUMNS = [
     "customer_id",
     "first_name",
@@ -101,12 +103,6 @@ def reset_snapshot(conn):
               f"orders = {count[2]}, order_items = {count[3]}")
 
 
-expected_counts = {
-    "customers": 100_000,
-    "products": 10_000,
-    "orders": 1_000_000,
-    "order_items": 2_000_000,
-}
 
 def run():
     with get_connection() as conn:
@@ -117,9 +113,7 @@ def run():
         load_orders(conn)
         load_order_items(conn)
 
-        
-        validate_row_counts(conn, expected_counts)
-
+        validation_snapshot(conn)
         conn.commit()
 
 if __name__ == "__main__":
