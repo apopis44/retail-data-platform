@@ -24,30 +24,7 @@ PostgreSQL into BigQuery Bronze.
 
 ## Architecture
 
-Solid arrows show the implemented local flow. Dashed arrows show the next and
-planned stages.
-
-```mermaid
-flowchart LR
-    Generator["Python data generator"] --> CSV["Retail CSV snapshots"]
-    CSV --> Loader["Python snapshot loader"]
-    Loader --> Postgres["PostgreSQL source"]
-
-    Postgres -->|"logical WAL"| Debezium["Debezium Connect"]
-    Debezium --> Kafka["Kafka CDC topics"]
-
-    Postgres -.->|"batch extraction"| Dagster["Dagster"]
-    Dagster -.-> Bronze["BigQuery Bronze"]
-
-    Kafka -.-> Flink["Flink / Flink SQL"]
-    Flink -.-> Bronze
-
-    Bronze -.-> DBT1["dbt staging models"]
-    DBT1 -.-> Silver["BigQuery Silver"]
-    Silver -.-> DBT2["dbt business models"]
-    DBT2 -.-> Gold["BigQuery Gold"]
-    Gold -.-> Analytics["BI and analytics"]
-```
+![Retail data platform architecture](docs/project_diagram.svg)
 
 Component ownership is intentionally separated:
 
