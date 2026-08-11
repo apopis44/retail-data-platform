@@ -1,0 +1,24 @@
+{
+  "name": "postgres-orders-cdc",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "${POSTGRES_USER}",
+    "database.password": "${POSTGRES_PASSWORD}",
+    "database.dbname": "${POSTGRES_DB}",
+    "topic.prefix": "retail",
+    "plugin.name": "pgoutput",
+    "slot.name": "retail_orders_slot",
+    "publication.name": "retail_orders_cdc",
+    "publication.autocreate.mode": "disabled",
+    "table.include.list": "public.customers,public.products,public.orders,public.order_items,public.debezium_signal",
+    "signal.data.collection": "public.debezium_signal",
+    "incremental.snapshot.chunk.size": "10000",
+    "decimal.handling.mode": "double",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false"
+  }
+}
