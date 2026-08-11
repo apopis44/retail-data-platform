@@ -8,18 +8,16 @@ the Bronze layer.
 
 ## Project status
 
-The source snapshot pipeline and the first PostgreSQL-to-Kafka CDC path are
-complete. The current Debezium connector captures `orders`; the next ingestion
-milestone is to capture all four source tables and use Flink to land their raw
-CDC events in BigQuery Bronze.
+The source snapshot pipeline and PostgreSQL-to-Kafka CDC path are complete for
+all four source tables. The next ingestion milestone is to use Flink to land the
+raw CDC events in BigQuery Bronze.
 
 | Layer | Status |
 | --- | --- |
 | Synthetic retail data generation | Complete |
 | PostgreSQL source schema and snapshot load | Complete |
 | Snapshot validation | Complete |
-| PostgreSQL -> Debezium -> Kafka CDC for `orders` | Complete |
-| CDC coverage for all four source tables | Next |
+| PostgreSQL -> Debezium -> Kafka CDC for all source tables | Complete |
 | BigQuery Bronze, Silver, and Gold datasets | Provisioned |
 | Flink Kafka -> BigQuery Bronze sink | Planned |
 | Dagster + dbt Bronze -> Silver -> Gold processing | Planned |
@@ -165,14 +163,14 @@ internal listener for container-to-container communication and an external
 listener for local development. Debezium Connect reads PostgreSQL changes and
 publishes each captured table to its own Kafka topic.
 
-The currently registered connector captures only `public.orders` and publishes
-to `retail.public.orders`. The target design includes `customers`, `products`,
-`orders`, and `order_items` so their initial snapshots and subsequent changes
-all reach Kafka before data is routed into Bronze.
+The registered connector captures `customers`, `products`, `orders`, and
+`order_items`, publishing each table to its own `retail.public.*` Kafka topic.
+The original `orders` snapshot was preserved; Debezium incremental snapshots
+backfilled the other three tables while normal WAL streaming continued.
 
-The connector registration is currently runtime state and is not recreated by
-`docker compose up` alone. Versioning that registration payload is a remaining
-reproducibility improvement for the CDC setup.
+The connector template and PostgreSQL publication/signaling setup are versioned
+under `docker/debezium`. Database credentials remain environment-variable
+placeholders and are not committed in the connector template.
 
 ## Configuration
 
@@ -196,8 +194,8 @@ The defaults are intended only for local development.
 - [x] Add row-count and referential-integrity validation
 - [x] Configure PostgreSQL, Kafka, and Debezium CDC infrastructure
 - [x] Snapshot and stream `orders` into Kafka
-- [ ] Version the Debezium connector registration
-- [ ] Expand CDC capture to `customers`, `products`, `orders`, and `order_items`
+- [x] Version the Debezium connector registration
+- [x] Expand CDC capture to `customers`, `products`, `orders`, and `order_items`
 - [ ] Build the stateless Flink Kafka -> BigQuery Bronze sink
 - [ ] Build incremental dbt Bronze -> Silver -> Gold models and tests
 - [ ] Orchestrate dbt models, tests, and freshness checks with Dagster
