@@ -1,120 +1,199 @@
 # Retail Data Platform
 
-A production-style learning project that combines streaming ingestion with
-scheduled warehouse transformations for retail analytics. PostgreSQL is the
-operational source, Debezium and Kafka carry change data capture (CDC) events,
-Flink lands those events in BigQuery, and Dagster orchestrates dbt models after
-the Bronze layer.
+A production-style retail data platform built to practise reproducible change
+data capture, low-latency stream processing, cloud data warehousing, and
+scheduled analytics transformations.
+
+PostgreSQL is the operational source. Debezium captures committed changes,
+Kafka stores the CDC streams, Flink SQL parses and types the events, and
+BigQuery persists both append-only Bronze history and five-minute real-time
+order metrics. Dagster and dbt will own the scheduled transformations after
+Bronze.
 
 ## Project status
 
-The source snapshot pipeline and PostgreSQL-to-Kafka CDC path are complete for
-all four source tables. The next ingestion milestone is to use Flink to land the
-raw CDC events in BigQuery Bronze.
-
-| Layer | Status |
+| Capability | Status |
 | --- | --- |
-| Synthetic retail data generation | Complete |
-| PostgreSQL source schema and snapshot load | Complete |
-| Snapshot validation | Complete |
-| PostgreSQL -> Debezium -> Kafka CDC for all source tables | Complete |
-| BigQuery Bronze, Silver, and Gold datasets | Provisioned |
-| Flink SQL Kafka -> BigQuery Bronze sinks | Next milestone |
-| Dagster + dbt Bronze -> Silver -> Gold processing | Planned |
+| Deterministic synthetic retail data | Complete |
+| PostgreSQL schema, snapshot load, and validation | Complete |
+| PostgreSQL publication and Debezium CDC connector | Complete |
+| Four table-specific Kafka CDC topics | Complete |
+| Debezium heartbeat topic | Complete |
+| Flink SQL typed CDC processing | Complete |
+| Four BigQuery Bronze CDC tables | Complete |
+| Five-minute event-derived order metrics | Complete |
+| Dagster + dbt Bronze to Silver to Gold processing | Planned |
+| Monitoring and infrastructure as code | Planned |
 
 ## Architecture
 
-![Retail data platform workflow](docs/new_flow.svg)
+![Retail data platform architecture](docs/new_flow.svg)
 
-Component ownership is intentionally separated:
+The completed real-time ingestion path is shown in more detail below.
 
-- **PostgreSQL** remains the operational source of truth.
-- **Debezium** performs the initial snapshot and then captures committed row
-  changes from PostgreSQL WAL.
-- **Kafka** stores the raw CDC stream in table-specific topics.
-- **Flink SQL** continuously reads the four Kafka topics and routes their raw
-  events into table-specific BigQuery Bronze tables.
-- **BigQuery Bronze** stores the append-only raw CDC event history, including
-  the Debezium envelope and Kafka ingestion metadata.
-- **Dagster** schedules and observes the daily dbt transformation jobs.
-- **dbt** incrementally resolves Bronze events into current relational state in
-  Silver, runs data-quality tests, and builds Gold business aggregations.
+![Flink real-time processing workflow](docs/flink_realtime_workflow.svg)
 
-## Processing workflow
+The components have intentionally separate responsibilities:
 
-The ingestion path is streaming from the source through Bronze:
+- **PostgreSQL** is the operational source of truth.
+- **Debezium** performs the initial snapshot and continuously reads committed
+  changes from PostgreSQL WAL. It also publishes heartbeat events.
+- **Kafka** durably stores four table-specific CDC streams and one heartbeat
+  stream.
+- **Flink SQL** parses the Debezium JSON, assigns SQL types, derives useful
+  fields, attaches CDC and Kafka metadata, and writes low-latency datasets.
+- **BigQuery Bronze** stores typed, append-only CDC event history. It does not
+  store the Debezium `before` object.
+- **BigQuery Realtime** stores five-minute event-time order metrics produced by
+  Flink.
+- **dbt** will resolve CDC history into current relational state, test it, and
+  build Silver and Gold analytical models.
+- **Dagster** will schedule, orchestrate, retry, and observe the dbt jobs.
 
-```text
-PostgreSQL -> Debezium -> Kafka -> Flink -> BigQuery Bronze
-```
-
-When a Debezium connector starts without stored offsets, it takes a consistent
-snapshot of every included table and writes one read event per row to Kafka.
-After the snapshot completes, the same connector continuously publishes
-inserts, updates, and deletes from PostgreSQL WAL. This keeps related entities
-such as customers, orders, and order items on the same ingestion path and avoids
-waiting for a separate daily source extract.
-
-The initial snapshot has been verified for all four source tables:
-
-| Kafka topic | Snapshot records |
-| --- | ---: |
-| `retail.public.customers` | 100,000 |
-| `retail.public.products` | 10,000 |
-| `retail.public.orders` | 1,000,000 |
-| `retail.public.order_items` | 2,000,000 |
-| **Total** | **3,110,000** |
-
-Debezium committed the snapshot offsets and is now continuously processing live
-WAL changes. Snapshot reads use operation `r`; subsequent creates, updates, and
-deletes use `c`, `u`, and `d`.
-
-The scheduled batch boundary begins after Bronze:
+## Data flow
 
 ```text
-Dagster -> dbt: Bronze -> Silver -> Gold
+PostgreSQL
+    -> Debezium
+    -> Kafka
+    -> Flink SQL
+    -> BigQuery Bronze + BigQuery Realtime
+    -> Dagster + dbt
+    -> BigQuery Silver + Gold
 ```
 
-dbt performs the stateful warehouse work: deduplication, applying the latest CDC
-operation, relationship checks, joins, and aggregations. Dagster provides the
-schedule, dependency orchestration, retries, observability, and test execution;
-it does not extract PostgreSQL tables into Bronze.
+### PostgreSQL to Kafka
 
-## Source data model
+The source contains four related entities:
 
-The generated dataset represents four related retail entities:
-
-| Table | Default rows | Description |
+| PostgreSQL table | Default rows | Kafka topic |
 | --- | ---: | --- |
-| `customers` | 100,000 | Customer identity and country |
-| `products` | 10,000 | Product catalogue and pricing |
-| `orders` | 1,000,000 | Customer orders and status |
-| `order_items` | 2,000,000 | Products and quantities within orders |
+| `customers` | 100,000 | `retail.public.customers` |
+| `products` | 10,000 | `retail.public.products` |
+| `orders` | 1,000,000 | `retail.public.orders` |
+| `order_items` | 2,000,000 | `retail.public.order_items` |
+| **Total** | **3,110,000** | |
 
-PostgreSQL enforces primary keys, foreign keys, uniqueness, non-negative prices,
-positive quantities, and indexes on the main relationship and date columns.
+When no connector offsets exist, Debezium takes a consistent initial snapshot.
+Snapshot events use operation `r`. After the snapshot, inserts, updates, and
+deletes are published from PostgreSQL WAL with operations `c`, `u`, and `d`.
+
+The idempotent `cdc-bootstrap` service reconciles the PostgreSQL publication,
+the five application topics, and the Debezium connector through their
+respective APIs. Re-running it does not delete source data, topics, offsets, or
+the replication slot.
+
+The fifth application topic, `retail.heartbeat`, is emitted every 30 seconds.
+It advances event time for the order-metrics branch even when no new order
+arrives.
+
+### Kafka to BigQuery Bronze
+
+The four CDC topics map to four physical BigQuery tables:
+
+| Kafka topic | BigQuery destination |
+| --- | --- |
+| `retail.public.customers` | `retail_bronze.customers_cdc` |
+| `retail.public.products` | `retail_bronze.products_cdc` |
+| `retail.public.orders` | `retail_bronze.orders_cdc` |
+| `retail.public.order_items` | `retail_bronze.order_items_cdc` |
+
+Flink temporary tables are logical Kafka source and BigQuery sink definitions;
+they do not hold intermediate data. Temporary views continuously transform
+each incoming event by:
+
+- reading the Debezium `after`, `source`, transaction, and operation fields;
+- assigning SQL types to the business fields;
+- preserving the record identifier on deletes by falling back to the Kafka
+  key;
+- deriving `line_amount` for order items;
+- adding source, Debezium, Kafka, and Flink timestamps and metadata; and
+- creating a deterministic `cdc_event_id` from topic, partition, and offset.
+
+Bronze remains append-only. Updates and deletes are stored as new CDC event
+rows; dbt will later resolve the latest operation for each business key.
+
+### Event-derived metrics
+
+The orders topic is parsed once. Flink branches the shared `orders_typed` view
+into the Bronze sink and the metrics calculation instead of reading and parsing
+the Kafka topic twice.
+
+The metrics branch combines new-order events (`operation = 'c'`) with the
+heartbeat stream and applies a five-minute event-time tumbling window. Results
+are written to:
+
+```text
+retail_realtime.order_metrics_5m
+```
+
+Each row contains:
+
+- window start and end;
+- new-order count;
+- gross revenue;
+- average order value;
+- unique customers;
+- the heartbeat that advanced the watermark; and
+- the metric generation timestamp.
+
+Heartbeat-only windows are intentionally retained. They produce a zero order
+count and zero gross revenue, with a null average order value, proving that the
+stream is healthy even during periods without orders.
+
+## Delivery and recovery
+
+All five outputs run in one long-lived Flink SQL Statement Set:
+
+- four BigQuery Bronze sinks; and
+- one BigQuery real-time metrics sink.
+
+The BigQuery sinks use the connector's `exactly-once` delivery guarantee.
+Flink checkpoints every 15 seconds and retains checkpoint state on
+cancellation. Kafka offsets and BigQuery writes are committed with successful
+checkpoints, so records that were not committed before a failure can be safely
+replayed.
+
+The four business sources start from their Kafka consumer-group offsets. The
+heartbeat source starts at the latest offset because historical heartbeats are
+not business data and do not need to be replayed.
 
 ## Repository structure
 
 ```text
 retail-data-platform/
-├── dagster/                 # Dagster orchestration for dbt jobs
-├── dbt/                     # Bronze -> Silver -> Gold models and tests
-├── dev/data/                # Generated CSV data (not committed)
-├── docker/kafka/            # CDC bootstrap image and pinned dependencies
-├── docker/postgres/init/    # PostgreSQL source schema
-├── docs/                    # Architecture and workflow diagrams
-├── flink/jobs/              # Planned Flink jobs
-├── flink-sql/               # Planned streaming SQL
-├── kafka/                   # Idempotent PostgreSQL-to-Kafka CDC bootstrap
-├── monitoring/              # Planned observability configuration
-├── scripts/                 # Synthetic data generator
-├── src/ingestion/           # Snapshot loading and validation
-├── terraform/               # Planned cloud infrastructure
-├── tests/                   # Planned automated tests
-├── docker-compose.yml       # Local PostgreSQL, Kafka, Debezium, and Flink
-└── requirements.txt         # Current Python dependencies
+├── dagster/                     # Planned dbt orchestration
+├── dbt/                         # Planned Silver and Gold models
+├── dev/data/                    # Generated CSV files; ignored by Git
+├── docker/
+│   ├── flink/                   # Flink image, runtime config, dependencies
+│   ├── kafka/                   # CDC bootstrap image and Python requirements
+│   └── postgres/init/           # PostgreSQL source schema
+├── docs/                        # Architecture and workflow diagrams
+├── flink/jobs/                  # Flink pipeline submission script
+├── flink-sql/                   # Sources, views, sinks, and Statement Set
+├── kafka/                       # Idempotent CDC bootstrap package
+├── monitoring/                  # Planned observability configuration
+├── scripts/                     # Synthetic data generator
+├── src/ingestion/               # Snapshot load and validation
+├── terraform/                   # Planned cloud infrastructure
+├── tests/                       # Automated test area
+├── docker-compose.yml           # Local data-platform services
+└── requirements.txt             # Local snapshot-ingestion dependency
 ```
+
+## Technology versions
+
+| Component | Version |
+| --- | --- |
+| Python | 3.12 |
+| PostgreSQL | 16 |
+| Apache Kafka | 4.0.0 |
+| Debezium Connect | 3.6.0.Final |
+| Apache Flink | 1.20.5, Scala 2.12, Java 17 |
+
+Flink 1.20.5 is used because it includes fixes required by this SQL Statement
+Set and connector combination.
 
 ## Local setup
 
@@ -122,9 +201,30 @@ retail-data-platform/
 
 - Python 3.12
 - Docker with Docker Compose
-- Enough local storage for the generated dataset and container volumes
+- Google Cloud CLI
+- A GCP project with BigQuery enabled
+- BigQuery datasets named `retail_bronze`, `retail_realtime`,
+  `retail_silver`, and `retail_gold`
 
-### 1. Create the Python environment
+### 1. Configure the environment
+
+Copy the safe template and fill in the machine-specific values:
+
+```bash
+cp .env.examples .env
+```
+
+At minimum, replace the PostgreSQL password, GCP project ID, and absolute path
+to the local Application Default Credentials file. The real `.env` file is
+ignored by Git.
+
+Create local Application Default Credentials if they do not already exist:
+
+```bash
+gcloud auth application-default login
+```
+
+### 2. Create the Python environment
 
 ```bash
 python3.12 -m venv .venv
@@ -133,131 +233,100 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-### 2. Generate the source data
-
-The ingestion pipeline reads from `dev/data` by default.
+### 3. Generate the source data
 
 ```bash
 python scripts/generate_data.py --output dev/data
 ```
 
-Generation is deterministic with the default random seed of `42`. Row counts,
-the output directory, and the seed can be changed through the script's command
-line options.
+Generation is deterministic with the default random seed of `42`.
 
-### 3. Start the local platform
+### 4. Start PostgreSQL and load the snapshot
 
 ```bash
-docker compose up --build -d cdc-bootstrap
-docker compose ps
+docker compose up -d postgres
+set -a
+source .env
+set +a
+POSTGRES_HOST=localhost python -m src.ingestion.pipeline
 ```
 
-The compose stack starts:
+The snapshot pipeline truncates and loads the four source tables inside one
+transaction, validates row counts and referential integrity, and commits only
+after every validation succeeds. Docker Compose reads `.env` automatically;
+the shell export above makes the same values available to the local Python
+process while overriding the container-only hostname.
 
-- PostgreSQL on `localhost:5432`
-- Kafka on `localhost:9092`
-- Debezium Connect on `localhost:8083`
-- A one-shot `cdc-bootstrap` setup container
-- Flink JobManager on `localhost:8081`
-- Flink TaskManager
-
-The bootstrap container exits successfully after it has reconciled the
-PostgreSQL publication, created and validated the four Kafka topics, applied the
-Debezium connector configuration, and confirmed that the connector task is
-running. PostgreSQL, Kafka, and Debezium remain running after the bootstrap
-exits.
-
-### 4. Load and validate the PostgreSQL snapshot
+### 5. Start CDC and Flink
 
 ```bash
-python -m src.ingestion.pipeline
+docker compose up --build -d \
+  cdc-bootstrap \
+  flink-jobmanager \
+  flink-taskmanager
 ```
 
-The snapshot load runs as one transaction:
+Confirm the one-shot bootstrap completed successfully:
 
-1. Truncate the four source tables.
-2. Bulk-load the CSV files with PostgreSQL `COPY`.
-3. Validate the expected row counts.
-4. Validate referential integrity between the tables.
-5. Commit only after all validations succeed.
+```bash
+docker compose logs cdc-bootstrap
+```
 
-## CDC notes
+The persistent services remain running after `cdc-bootstrap` exits with code
+zero.
 
-PostgreSQL is configured with logical replication enabled. Kafka exposes an
-internal listener for container-to-container communication and an external
-listener for local development. Debezium Connect reads PostgreSQL changes and
-publishes each captured table to its own Kafka topic.
+### 6. Submit the Flink SQL pipeline
 
-The registered connector captures `customers`, `products`, `orders`, and
-`order_items`, publishing each table to its own `retail.public.*` Kafka topic.
-The initial snapshot completed for all four tables, Kafka Connect acknowledged
-3,110,000 messages, and Debezium transitioned to continuous WAL streaming.
+```bash
+docker compose exec flink-jobmanager \
+  /opt/flink/jobs/submit_realtime_pipeline.sh
+```
 
-CDC infrastructure is reproducible through the root `kafka` Python package and
-the one-shot `cdc-bootstrap` Compose service. The bootstrap uses PostgreSQL,
-Kafka Admin, and Kafka Connect APIs to reconcile resources without deleting
-topics, replication slots, or source data. Configuration and credentials are
-injected through environment variables rather than committed connector files.
+The script renders the SQL with environment values, submits one detached
+Statement Set, and prints the Flink Job ID. The job remains running after the
+SQL client exits.
 
-## Next milestone: Flink SQL to BigQuery Bronze
+Open the Flink dashboard at [http://localhost:8081](http://localhost:8081) and
+confirm that the job and all five sink branches are running.
 
-Each Kafka topic will be consumed continuously by Flink SQL and written to its
-own append-only Bronze table:
+## Configuration reference
 
-| Kafka source topic | BigQuery Bronze target |
+| Variable | Purpose |
 | --- | --- |
-| `retail.public.customers` | `retail_bronze.customers_cdc` |
-| `retail.public.products` | `retail_bronze.products_cdc` |
-| `retail.public.orders` | `retail_bronze.orders_cdc` |
-| `retail.public.order_items` | `retail_bronze.order_items_cdc` |
-
-Bronze will preserve each complete Debezium JSON envelope as raw JSON text,
-including `before`, `after`, `op`, source metadata, and transaction metadata.
-Each row will also carry the Kafka key, topic, partition, offset, timestamp, and
-a Flink ingestion timestamp. The Flink SQL pipeline is a stateless pass-through;
-it does not window, join, aggregate, deduplicate, or resolve current state.
-
-dbt will later parse and type the raw JSON, apply CDC operations, and build the
-current relational state in Silver. Dimensional models and business facts will
-be built in BigQuery Gold.
-
-## Configuration
-
-The ingestion and CDC bootstrap support these core environment variables:
-
-| Variable | Default |
-| --- | --- |
-| `DATA_DIR` | `dev/data` |
-| `POSTGRES_HOST` | `postgres` inside Compose |
-| `POSTGRES_PORT` | `5432` |
-| `POSTGRES_DB` | `retail` |
-| `POSTGRES_USER` | `retail_user` |
-| `POSTGRES_PASSWORD` | `retail_password` |
-| `KAFKA_BOOTSTRAP_SERVERS` | `kafka:29092` |
-| `KAFKA_TOPIC_PREFIX` | `retail` |
-| `KAFKA_TOPIC_PARTITIONS` | `3` |
-| `KAFKA_TOPIC_REPLICATION_FACTOR` | `1` |
-| `DEBEZIUM_URL` | `http://debezium:8083` |
-| `DEBEZIUM_CONNECTOR_NAME` | `postgres-retail-cdc` |
-| `POSTGRES_PUBLICATION_NAME` | `retail_cdc` |
-| `POSTGRES_REPLICATION_SLOT_NAME` | `retail_cdc_slot` |
-
-The defaults are intended only for local development.
+| `POSTGRES_HOST` | PostgreSQL host used inside Compose |
+| `POSTGRES_PORT` | PostgreSQL port |
+| `POSTGRES_DB` | Source database name |
+| `POSTGRES_USER` | Source database user |
+| `POSTGRES_PASSWORD` | Source database password |
+| `KAFKA_BOOTSTRAP_SERVERS` | Kafka internal listener |
+| `KAFKA_TOPIC_PREFIX` | Prefix for table-specific CDC topics |
+| `KAFKA_TOPIC_PARTITIONS` | Partition count for application topics |
+| `KAFKA_TOPIC_REPLICATION_FACTOR` | Replication factor for application topics |
+| `DEBEZIUM_URL` | Kafka Connect REST endpoint |
+| `DEBEZIUM_CONNECTOR_NAME` | PostgreSQL connector name |
+| `DEBEZIUM_HEARTBEAT_TOPIC` | Heartbeat topic consumed by Flink |
+| `DEBEZIUM_HEARTBEAT_INTERVAL_MS` | Debezium heartbeat interval |
+| `POSTGRES_PUBLICATION_NAME` | Logical-replication publication |
+| `POSTGRES_REPLICATION_SLOT_NAME` | Debezium replication slot |
+| `GOOGLE_CLOUD_PROJECT` | BigQuery project ID |
+| `GOOGLE_ADC_PATH` | Host path to the ADC JSON file mounted read-only |
 
 ## Roadmap
 
 - [x] Generate deterministic retail source data
-- [x] Build the PostgreSQL snapshot ingestion pipeline
-- [x] Add row-count and referential-integrity validation
-- [x] Configure PostgreSQL, Kafka, and Debezium CDC infrastructure
-- [x] Build an idempotent Python CDC bootstrap container
-- [x] Create and validate four table-specific Kafka topics
-- [x] Snapshot 3,110,000 records across all four source tables
-- [x] Stream live PostgreSQL WAL changes through Debezium into Kafka
-- [ ] Build four stateless Flink SQL Kafka -> BigQuery Bronze sinks
-- [ ] Build incremental dbt Bronze -> Silver -> Gold models and tests
-- [ ] Orchestrate dbt models, tests, and freshness checks with Dagster
-- [ ] Add monitoring, automated tests, and Terraform infrastructure
+- [x] Load and validate the PostgreSQL snapshot
+- [x] Build reproducible PostgreSQL-to-Kafka CDC infrastructure
+- [x] Snapshot 3,110,000 records across four source tables
+- [x] Stream live WAL changes into four Kafka topics
+- [x] Add Debezium heartbeats for event-time progress
+- [x] Parse and type all four CDC streams with Flink SQL
+- [x] Load four append-only BigQuery Bronze tables
+- [x] Produce heartbeat-driven five-minute order metrics
+- [x] Configure checkpoint-backed exactly-once BigQuery delivery
+- [ ] Build incremental dbt Bronze to Silver models and tests
+- [ ] Build dimensional and reporting models in BigQuery Gold
+- [ ] Orchestrate dbt jobs and quality checks with Dagster
+- [ ] Add production monitoring and Terraform infrastructure
 
 ## License
 

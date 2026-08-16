@@ -1,3 +1,10 @@
+x-flink-image: &flink-image
+  build:
+    context: .
+    dockerfile: docker/flink/Dockerfile
+  image: retail-data-platform-flink:1.20.5
+
+
 services:
 
   postgres:
@@ -109,6 +116,7 @@ services:
       VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
 
       CONNECT_REST_ADVERTISED_HOST_NAME: debezium
+
     healthcheck:
       test:
         [
@@ -150,12 +158,14 @@ services:
 
       DEBEZIUM_URL: ${DEBEZIUM_URL:?DEBEZIUM_URL must be set}
       DEBEZIUM_CONNECTOR_NAME: ${DEBEZIUM_CONNECTOR_NAME:-postgres-retail-cdc}
+      DEBEZIUM_HEARTBEAT_TOPIC: ${DEBEZIUM_HEARTBEAT_TOPIC:?DEBEZIUM_HEARTBEAT_TOPIC must be set}
+      DEBEZIUM_HEARTBEAT_INTERVAL_MS: ${DEBEZIUM_HEARTBEAT_INTERVAL_MS:?DEBEZIUM_HEARTBEAT_INTERVAL_MS must be set}
 
       POSTGRES_PUBLICATION_NAME: ${POSTGRES_PUBLICATION_NAME:-retail_cdc}
       POSTGRES_REPLICATION_SLOT_NAME: ${POSTGRES_REPLICATION_SLOT_NAME:-retail_cdc_slot}
 
   flink-jobmanager:
-    image: flink:1.20.1-scala_2.12-java17
+    <<: *flink-image
     container_name: retail-flink-jobmanager
     restart: unless-stopped
     command: jobmanager
@@ -163,11 +173,19 @@ services:
     ports:
       - "8081:8081"
 
+    env_file:
+      - ./docker/flink/flink.env
+
     environment:
-      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager"
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?KAFKA_BOOTSTRAP_SERVERS must be set}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:?GOOGLE_CLOUD_PROJECT must be set}
+      DEBEZIUM_HEARTBEAT_TOPIC: ${DEBEZIUM_HEARTBEAT_TOPIC:?DEBEZIUM_HEARTBEAT_TOPIC must be set}
 
     volumes:
       - ./flink/jobs:/opt/flink/jobs
+      - ./flink-sql:/opt/flink/sql:ro
+      - ${GOOGLE_ADC_PATH:?GOOGLE_ADC_PATH must be set}:/run/secrets/gcp_adc:ro
+      - flink_checkpoints:/opt/flink/checkpoints
 
     healthcheck:
       test: ["CMD-SHELL",
@@ -179,19 +197,23 @@ services:
       start_period: 20s
 
   flink-taskmanager:
-    image: flink:1.20.1-scala_2.12-java17
+    environment:
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:?GOOGLE_CLOUD_PROJECT must be set}
+    <<: *flink-image
     container_name: retail-flink-taskmanager
     restart: unless-stopped
     command: taskmanager
-    depends_on: 
+    depends_on:
       flink-jobmanager:
         condition: service_healthy
 
-    environment:
-      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager\ntaskmanager.numberOfTaskSlots: 2"
+    env_file:
+      - ./docker/flink/flink.env
 
-    volumes: 
+    volumes:
       - ./flink/jobs:/opt/flink/jobs
+      - ${GOOGLE_ADC_PATH:?GOOGLE_ADC_PATH must be set}:/run/secrets/gcp_adc:ro
+      - flink_checkpoints:/opt/flink/checkpoints
 
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f 'org.apache.flink.runtime.taskexecutor.TaskManagerRunner' > /dev/null || exit 1"]
@@ -204,3 +226,4 @@ services:
 volumes:
   postgres_data:
   kafka_data:
+  flink_checkpoints:

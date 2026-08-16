@@ -34,6 +34,11 @@ def build_connector_config(
 
         "topic.prefix": settings.topic_prefix,
 
+        "topic.heartbeat.name": settings.heartbeat_topic,
+        "heartbeat.interval.ms": str(
+            settings.heartbeat_interval_ms
+        ),
+
         "plugin.name": "pgoutput",
         "publication.name": settings.publication_name,
         "publication.autocreate.mode": "disabled",
