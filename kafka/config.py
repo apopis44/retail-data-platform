@@ -30,6 +30,8 @@ class Settings:
 
     debezium_url: str
     connector_name: str
+    heartbeat_topic: str
+    heartbeat_interval_ms: int
     publication_name: str
     replication_slot_name: str
 
@@ -41,10 +43,12 @@ class Settings:
 
     @property
     def topic_names(self) -> tuple[str, ...]:
-        return tuple(
+        cdc_topics = tuple(
             f"{self.topic_prefix}.{table}"
             for table in self.tables
         )
+
+        return cdc_topics + (self.heartbeat_topic,)
 
     @property
     def table_include_list(self) -> str:
@@ -52,6 +56,14 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
+        heartbeat_interval_ms = int(
+            required_env("DEBEZIUM_HEARTBEAT_INTERVAL_MS")
+        )
+
+        if heartbeat_interval_ms <= 0:
+            raise ValueError(
+                "DEBEZIUM_HEARTBEAT_INTERVAL_MS must be greater than zero"
+            )
         return cls(
             postgres_host= required_env("POSTGRES_HOST"),
             postgres_port= int(os.getenv("POSTGRES_PORT", "5432")),
@@ -66,6 +78,12 @@ class Settings:
                 "DEBEZIUM_CONNECTOR_NAME",
                 "postgres-retail-cdc"
             ),
+
+            heartbeat_topic=required_env(
+                "DEBEZIUM_HEARTBEAT_TOPIC"
+            ),
+            heartbeat_interval_ms=heartbeat_interval_ms,
+
             publication_name= os.getenv(
                 "POSTGRES_PUBLICATION_NAME",
                 "retail_cdc"

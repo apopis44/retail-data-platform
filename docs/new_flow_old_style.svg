@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1600"
+     height="540"
+     viewBox="0 0 1600 540"
+     role="img"
+     aria-labelledby="title description">
+  <title id="title">Retail data platform workflow in the original diagram style</title>
+  <desc id="description">
+    PostgreSQL changes flow through Debezium, Kafka, and Flink SQL into typed
+    BigQuery Bronze tables and five-minute BigQuery Realtime metrics. The
+    planned Dagster and dbt path transforms Bronze data into Silver and Gold.
+  </desc>
+
+  <defs>
+    <marker id="arrow"
+            markerWidth="10"
+            markerHeight="10"
+            refX="8"
+            refY="5"
+            orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#b3b3b3"/>
+    </marker>
+    <style>
+      text {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        fill: #ffffff;
+      }
+      .node {
+        fill: #363636;
+        fill-opacity: 0.96;
+        stroke: rgba(255, 255, 255, 0.18);
+        stroke-width: 1.5;
+      }
+      .planned {
+        fill: #303030;
+        fill-opacity: 0.96;
+        stroke: #737373;
+        stroke-width: 1.5;
+        stroke-dasharray: 6 5;
+      }
+      .title {
+        font-size: 17px;
+        font-weight: 600;
+        text-anchor: middle;
+      }
+      .subtitle {
+        font-size: 13px;
+        fill: #d1d5db;
+        text-anchor: middle;
+      }
+      .small {
+        font-size: 11px;
+        fill: #a3a3a3;
+        text-anchor: middle;
+      }
+      .flow {
+        fill: none;
+        stroke: #b3b3b3;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        marker-end: url(#arrow);
+      }
+      .planned-flow {
+        fill: none;
+        stroke: #8b8b8b;
+        stroke-width: 1.8;
+        stroke-dasharray: 6 5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        marker-end: url(#arrow);
+      }
+    </style>
+  </defs>
+
+  <rect width="1600" height="540" fill="#141414"/>
+
+  <!-- Planned warehouse transformation path -->
+  <g>
+    <rect class="planned" x="600" y="42" width="150" height="72" rx="9"/>
+    <text class="title" x="675" y="71">Dagster</text>
+    <text class="subtitle" x="675" y="94">orchestration</text>
+
+    <rect class="planned" x="805" y="32" width="175" height="92" rx="9"/>
+    <text class="title" x="892.5" y="61">dbt</text>
+    <text class="subtitle" x="892.5" y="83">Silver models</text>
+    <text class="small" x="892.5" y="103">resolve current state</text>
+
+    <g transform="translate(1035 30)">
+      <path class="planned"
+            d="M 0 13 C 0 5.8 35.8 0 80 0
+               C 124.2 0 160 5.8 160 13
+               L 160 79
+               C 160 86.2 124.2 92 80 92
+               C 35.8 92 0 86.2 0 79 Z"/>
+      <ellipse class="planned" cx="80" cy="13" rx="80" ry="13"/>
+      <text class="title" x="80" y="46">BigQuery Silver</text>
+      <text class="small" x="80" y="68">current relational state</text>
+    </g>
+
+    <rect class="planned" x="1240" y="32" width="160" height="92" rx="9"/>
+    <text class="title" x="1320" y="61">dbt</text>
+    <text class="subtitle" x="1320" y="83">Gold models</text>
+    <text class="small" x="1320" y="103">dimensions and facts</text>
+
+    <g transform="translate(1440 30)">
+      <path class="planned"
+            d="M 0 13 C 0 5.8 32.5 0 72.5 0
+               C 112.5 0 145 5.8 145 13
+               L 145 79
+               C 145 86.2 112.5 92 72.5 92
+               C 32.5 92 0 86.2 0 79 Z"/>
+      <ellipse class="planned" cx="72.5" cy="13" rx="72.5" ry="13"/>
+      <text class="title" x="72.5" y="46">BigQuery Gold</text>
+      <text class="small" x="72.5" y="68">analytics models</text>
+    </g>
+
+    <path class="planned-flow" d="M 750 78 H 796"/>
+    <path class="planned-flow" d="M 980 78 H 1026"/>
+    <path class="planned-flow" d="M 1195 78 H 1231"/>
+    <path class="planned-flow" d="M 1400 78 H 1431"/>
+  </g>
+
+  <!-- Completed streaming path -->
+  <g>
+    <g transform="translate(35 278)">
+      <path class="node"
+            d="M 0 13 C 0 5.8 34.7 0 77.5 0
+               C 120.3 0 155 5.8 155 13
+               L 155 79
+               C 155 86.2 120.3 92 77.5 92
+               C 34.7 92 0 86.2 0 79 Z"/>
+      <ellipse class="node" cx="77.5" cy="13" rx="77.5" ry="13"/>
+      <text class="title" x="77.5" y="45">PostgreSQL</text>
+      <text class="subtitle" x="77.5" y="68">4 source tables</text>
+    </g>
+
+    <rect class="node" x="250" y="286" width="160" height="76" rx="8"/>
+    <text class="title" x="330" y="318">Debezium</text>
+    <text class="subtitle" x="330" y="341">snapshot + WAL</text>
+
+    <rect class="node" x="475" y="286" width="145" height="76" rx="8"/>
+    <text class="title" x="547.5" y="318">Kafka</text>
+    <text class="subtitle" x="547.5" y="341">5 app topics</text>
+
+    <rect class="node" x="685" y="274" width="190" height="100" rx="8"/>
+    <text class="title" x="780" y="308">Flink SQL</text>
+    <text class="subtitle" x="780" y="332">parse and type CDC</text>
+    <text class="subtitle" x="780" y="351">derive window metrics</text>
+
+    <g transform="translate(950 258)">
+      <path class="node"
+            d="M 0 15 C 0 6.7 40.3 0 90 0
+               C 139.7 0 180 6.7 180 15
+               L 180 91
+               C 180 99.3 139.7 106 90 106
+               C 40.3 106 0 99.3 0 91 Z"/>
+      <ellipse class="node" cx="90" cy="15" rx="90" ry="15"/>
+      <text class="title" x="90" y="50">BigQuery Bronze</text>
+      <text class="subtitle" x="90" y="72">4 typed CDC tables</text>
+      <text class="small" x="90" y="91">append-only history</text>
+    </g>
+
+    <g transform="translate(950 405)">
+      <path class="node"
+            d="M 0 13 C 0 5.8 45.9 0 102.5 0
+               C 159.1 0 205 5.8 205 13
+               L 205 79
+               C 205 86.2 159.1 92 102.5 92
+               C 45.9 92 0 86.2 0 79 Z"/>
+      <ellipse class="node" cx="102.5" cy="13" rx="102.5" ry="13"/>
+      <text class="title" x="102.5" y="44">BigQuery Realtime</text>
+      <text class="subtitle" x="102.5" y="66">order_metrics_5m</text>
+      <text class="small" x="102.5" y="83">heartbeat-driven windows</text>
+    </g>
+
+    <path class="flow" d="M 190 324 H 241"/>
+    <path class="flow" d="M 410 324 H 466"/>
+    <path class="flow" d="M 620 324 H 676"/>
+    <path class="flow" d="M 875 324 H 941"/>
+    <path class="flow" d="M 780 374 V 451 H 941"/>
+
+    <path class="planned-flow" d="M 1040 258 V 158 H 892.5 V 133"/>
+  </g>
+
+  <text class="small" x="800" y="524">
+    Solid lines: implemented streaming path • Dashed lines: planned Dagster + dbt path
+  </text>
+</svg>
