@@ -1,0 +1,133 @@
+version: 2
+
+models:
+  - name: stg_customers_cdc
+    description: Standardized customer CDC events from the Bronze layer.
+
+    columns:
+      - name: cdc_event_id
+        description: Unique identifier for the CDC event.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: customer_id
+        description: customer business identifier.
+        data_tests:
+          - not_null
+
+      - name: cdc_operation
+        description: Debezium CDC operation code.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - r
+                  - c
+                  - u
+                  - d
+
+  - name: stg_products_cdc
+    description: Standardized product CDC events from the Bronze layer.
+
+    columns:
+      - name: cdc_event_id
+        description: Unique identifier for the CDC event.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: product_id
+        description: Product business identifier.
+        data_tests:
+          - not_null
+
+      - name: cdc_operation
+        description: Debezium CDC operation code.
+        data_tests: 
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - r
+                  - c
+                  - u
+                  - d
+
+  - name: stg_orders_cdc
+    description: Standardized order CDC events from the Bronze layer.
+
+    columns:
+      - name: cdc_event_id
+        description: Unique identifier for the CDC event.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: order_id
+        description: Order business identifier.
+        data_tests:
+          - not_null
+
+      - name: customer_id
+        description: Customer associated with the order.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_customers_cdc')
+                field: customer_id
+
+      - name: cdc_operation
+        description: Debezium CDC operation code.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - r
+                  - c
+                  - u
+                  - d
+
+  - name: stg_order_items_cdc
+    description: Standardized order-item CDC events from the Bronze layer.
+
+    columns:
+      - name: cdc_event_id
+        description: Unique identifier for the CDC event.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: order_item_id
+        description: Order-item business identifier.
+        data_tests:
+          - not_null
+
+      - name: order_id
+        description: parent order identifier.
+        data_tests:
+          - not_null
+
+      - name: product_id
+        description: Referenced product identifier.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_products_cdc')
+                field: product_id
+
+      - name: cdc_operation
+        description: Debezium CDC operation code.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - r
+                  - c
+                  - u
+                  - d

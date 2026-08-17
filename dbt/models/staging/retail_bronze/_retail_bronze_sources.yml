@@ -1,0 +1,23 @@
+version: 2
+
+sources:
+  - name: retail_bronze
+    description: >
+      Append-only, typed CDC events delivered from PostgreSQL through
+      Debezium, Kafka, and Flink SQL into BigQuery.
+    database: "{{ env_var('GOOGLE_CLOUD_PROJECT') }}"
+    schema: retail_bronze
+    loader: Flink SQL
+
+    tables:
+      - name: customers_cdc
+        description: Customer create, update, delete and snapshot events.
+
+      - name: products_cdc
+        description: Product create, update, delete and snapshot events.
+
+      - name: orders_cdc
+        description: order create, update, delete and snapshot events.
+
+      - name: order_items_cdc
+        description: order-items create, updatem delete and snapshot events.
