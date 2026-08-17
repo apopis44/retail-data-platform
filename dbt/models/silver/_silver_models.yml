@@ -1,0 +1,137 @@
+version: 2
+
+models:
+  - name: customers_current
+    description: Current non-deleted state of each customer.
+
+    columns:
+      - name: customer_id
+        description: Customer business identifier.
+        data_tests:
+          - not_null
+          - unique
+
+  - name: products_current
+    description: Current non-deleted state of each product.
+
+    columns:
+      - name: product_id
+        description: Product business identifier.
+        data_tests:
+          - not_null
+          - unique
+
+  - name: orders_current
+    description: Current non-deleted state of each order.
+
+    columns:
+      - name: order_id
+        description: order business identifier.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: customer_id
+        description: Customers who placed the order.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('customers_current')
+                field: customer_id
+
+      - name: status
+        description: Canonical current order status.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - PLACED
+                  - PROCESSING
+                  - SHIPPED
+                  - DELIVERED
+                  - CANCELLED
+
+  - name: order_items_current
+    description: Current non-deleted state of each order item.
+
+    columns:
+      - name: order_item_id
+        description: Order-item business identifier.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: order_id
+        description: Parent order identifier.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('orders_current')
+                field: order_id
+
+      - name: product_id
+        description: Product referenced by the order item.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('products_current')
+                field: product_id
+
+      - name: quantity
+        description: Number of product units in the order item.
+        data_tests:
+          - not_null
+
+      - name: line_amount
+        description: Extended amount for the order item.
+        data_tests:
+          - not_null
+
+  - name: order_status_history
+    description: Status-transition history for every order.
+
+    columns:
+      - name: cdc_event_id
+        description: CDC event that produced the status transition.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: order_id
+        description: Order associated with the transaction.
+        data_tests:
+          - not_null
+
+      - name: order_status
+        description: Status established by this transaction.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - PLACED
+                  - PROCESSING
+                  - SHIPPED
+                  - DELIVERED
+                  - CANCELLED
+                  - DELETED
+
+      - name: transition_type
+        description: Classification of the order-status transaction.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - initial_state
+                  - status_change
+                  - deletion
+
+      - name: transition_sequence
+        description: Sequential position of the transition within an order.
+        data_tests:
+          - not_null

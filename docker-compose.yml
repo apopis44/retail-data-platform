@@ -223,6 +223,26 @@ services:
       start_period: 30s
 
 
+  dbt:
+    build:
+      context: .
+      dockerfile: docker/dbt/Dockerfile
+
+    image: retail-data-platform-dbt:1.12.2
+
+    profiles:
+      - tools
+
+    working_dir: /app/dbt
+
+    environment:
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:?GOOGLE_CLOUD_PROJECT must be set}
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gcp_adc
+
+    volumes:
+      - ./dbt:/app/dbt
+      - ${GOOGLE_ADC_PATH:?GOOGLE_ADC_PATH must be set}:/run/secrets/gcp_adc:ro
+
 volumes:
   postgres_data:
   kafka_data:
