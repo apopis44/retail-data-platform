@@ -9,8 +9,9 @@
   <desc id="description">
     PostgreSQL changes flow through Debezium and Kafka into Flink SQL. Flink
     writes four typed CDC tables to BigQuery Bronze and five-minute order
-    metrics to BigQuery Realtime. The planned batch path uses Dagster and dbt
-    to transform Bronze data into BigQuery Silver and Gold.
+    metrics to BigQuery Realtime. dbt transforms Bronze CDC history into
+    tested BigQuery Silver models. Dagster orchestration and dbt Gold models
+    are planned.
   </desc>
 
   <defs>
@@ -74,7 +75,7 @@
 
   <text class="title" x="55" y="57">Retail data platform architecture</text>
   <text class="subtitle" x="55" y="87">
-    Streaming ingestion through Bronze • scheduled warehouse transformations after Bronze
+    Streaming ingestion and dbt Silver implemented • Dagster orchestration and Gold next
   </text>
 
   <rect x="35" y="125" width="1530" height="310" rx="24"
@@ -138,56 +139,66 @@
   <path class="cyan-flow" d="M 1110 292 H 1145 V 368 H 1181"/>
 
   <rect x="35" y="470" width="1530" height="180" rx="24"
-        fill="#0d1625" stroke="#334155" stroke-width="1.5"
-        stroke-dasharray="9 7"/>
-  <rect x="58" y="490" width="154" height="27" rx="13.5" fill="#293548"/>
-  <text class="tag" x="135" y="508" text-anchor="middle" fill="#cbd5e1">
-    PLANNED BATCH PATH
+        fill="#0d1625" stroke="#334155" stroke-width="1.5"/>
+  <rect x="58" y="490" width="390" height="27" rx="13.5" fill="#164e63"/>
+  <text class="tag" x="253" y="508" text-anchor="middle" fill="#67e8f9">
+    DBT SILVER IMPLEMENTED • DAGSTER + GOLD PLANNED
   </text>
 
   <g filter="url(#shadow)">
-    <rect x="420" y="535" width="205" height="86" rx="15"
-          fill="#1c2738" stroke="#64748b" stroke-width="1.5"/>
-    <text class="node-title" x="522.5" y="567" text-anchor="middle">Dagster</text>
-    <text class="node-subtitle" x="522.5" y="596" text-anchor="middle">
+    <rect x="70" y="535" width="205" height="86" rx="15"
+          fill="#1c2738" stroke="#64748b" stroke-width="1.5"
+          stroke-dasharray="7 6"/>
+    <text class="node-title" x="172.5" y="567" text-anchor="middle">Dagster</text>
+    <text class="node-subtitle" x="172.5" y="596" text-anchor="middle">
       Schedule and observe
     </text>
 
-    <rect x="710" y="535" width="205" height="86" rx="15"
-          fill="#1c2738" stroke="#64748b" stroke-width="1.5"/>
-    <text class="node-title" x="812.5" y="567" text-anchor="middle">dbt</text>
-    <text class="node-subtitle" x="812.5" y="596" text-anchor="middle">
-      Resolve and model CDC
+    <rect x="360" y="535" width="205" height="86" rx="15"
+          fill="#18263a" stroke="#22d3ee" stroke-width="2"/>
+    <text class="node-title" x="462.5" y="567" text-anchor="middle">dbt Silver</text>
+    <text class="node-subtitle" x="462.5" y="596" text-anchor="middle">
+      Resolve and test CDC
     </text>
 
-    <rect x="1000" y="535" width="205" height="86" rx="15"
-          fill="#17263d" stroke="#64748b" stroke-width="1.5"/>
-    <text class="node-title" x="1102.5" y="567" text-anchor="middle">
+    <rect x="650" y="535" width="205" height="86" rx="15"
+          fill="#17263d" stroke="#22d3ee" stroke-width="2"/>
+    <text class="node-title" x="752.5" y="567" text-anchor="middle">
       BigQuery Silver
     </text>
-    <text class="node-subtitle" x="1102.5" y="596" text-anchor="middle">
-      Current relational state
+    <text class="node-subtitle" x="752.5" y="596" text-anchor="middle">
+      Current state + history
     </text>
 
-    <rect x="1290" y="535" width="205" height="86" rx="15"
-          fill="#17263d" stroke="#64748b" stroke-width="1.5"/>
-    <text class="node-title" x="1392.5" y="567" text-anchor="middle">
+    <rect x="940" y="535" width="205" height="86" rx="15"
+          fill="#1c2738" stroke="#64748b" stroke-width="1.5"
+          stroke-dasharray="7 6"/>
+    <text class="node-title" x="1042.5" y="567" text-anchor="middle">dbt Gold</text>
+    <text class="node-subtitle" x="1042.5" y="596" text-anchor="middle">
+      Dimensions and facts
+    </text>
+
+    <rect x="1230" y="535" width="245" height="86" rx="15"
+          fill="#17263d" stroke="#64748b" stroke-width="1.5"
+          stroke-dasharray="7 6"/>
+    <text class="node-title" x="1352.5" y="567" text-anchor="middle">
       BigQuery Gold
     </text>
-    <text class="node-subtitle" x="1392.5" y="596" text-anchor="middle">
+    <text class="node-subtitle" x="1352.5" y="596" text-anchor="middle">
       Analytics and reporting
     </text>
   </g>
 
-  <path class="planned-flow" d="M 625 578 H 701"/>
-  <path class="planned-flow" d="M 915 578 H 991"/>
-  <path class="planned-flow" d="M 1205 578 H 1281"/>
-  <path class="planned-flow" d="M 1520 236 H 1540 V 445 H 812 V 526"/>
+  <path class="planned-flow" d="M 275 578 H 351"/>
+  <path class="cyan-flow" d="M 565 578 H 641"/>
+  <path class="planned-flow" d="M 855 578 H 931"/>
+  <path class="planned-flow" d="M 1145 578 H 1221"/>
+  <path class="cyan-flow" d="M 1520 236 H 1540 V 445 H 462 V 526"/>
   <text class="small" x="1080" y="460" text-anchor="middle">
     Bronze is the boundary between streaming ingestion and scheduled transformations
   </text>
 
   <text class="small" x="55" y="680">
-    Solid paths are implemented. Dashed paths represent the next Dagster + dbt milestone.
+    Solid paths are implemented. Dashed paths represent planned Dagster and Gold work.
   </text>
 </svg>

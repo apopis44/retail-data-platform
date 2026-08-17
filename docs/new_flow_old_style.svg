@@ -9,7 +9,8 @@
   <desc id="description">
     PostgreSQL changes flow through Debezium, Kafka, and Flink SQL into typed
     BigQuery Bronze tables and five-minute BigQuery Realtime metrics. The
-    planned Dagster and dbt path transforms Bronze data into Silver and Gold.
+    implemented dbt path transforms Bronze data into tested Silver models.
+    Dagster orchestration and dbt Gold models are planned.
   </desc>
 
   <defs>
@@ -76,25 +77,25 @@
 
   <rect width="1600" height="540" fill="#141414"/>
 
-  <!-- Planned warehouse transformation path -->
+  <!-- Implemented Silver path with planned orchestration and Gold path -->
   <g>
     <rect class="planned" x="600" y="42" width="150" height="72" rx="9"/>
     <text class="title" x="675" y="71">Dagster</text>
     <text class="subtitle" x="675" y="94">orchestration</text>
 
-    <rect class="planned" x="805" y="32" width="175" height="92" rx="9"/>
+    <rect class="node" x="805" y="32" width="175" height="92" rx="9"/>
     <text class="title" x="892.5" y="61">dbt</text>
     <text class="subtitle" x="892.5" y="83">Silver models</text>
     <text class="small" x="892.5" y="103">resolve current state</text>
 
     <g transform="translate(1035 30)">
-      <path class="planned"
+      <path class="node"
             d="M 0 13 C 0 5.8 35.8 0 80 0
                C 124.2 0 160 5.8 160 13
                L 160 79
                C 160 86.2 124.2 92 80 92
                C 35.8 92 0 86.2 0 79 Z"/>
-      <ellipse class="planned" cx="80" cy="13" rx="80" ry="13"/>
+      <ellipse class="node" cx="80" cy="13" rx="80" ry="13"/>
       <text class="title" x="80" y="46">BigQuery Silver</text>
       <text class="small" x="80" y="68">current relational state</text>
     </g>
@@ -117,7 +118,7 @@
     </g>
 
     <path class="planned-flow" d="M 750 78 H 796"/>
-    <path class="planned-flow" d="M 980 78 H 1026"/>
+    <path class="flow" d="M 980 78 H 1026"/>
     <path class="planned-flow" d="M 1195 78 H 1231"/>
     <path class="planned-flow" d="M 1400 78 H 1431"/>
   </g>
@@ -181,10 +182,10 @@
     <path class="flow" d="M 875 324 H 941"/>
     <path class="flow" d="M 780 374 V 451 H 941"/>
 
-    <path class="planned-flow" d="M 1040 258 V 158 H 892.5 V 133"/>
+    <path class="flow" d="M 1040 258 V 158 H 892.5 V 133"/>
   </g>
 
   <text class="small" x="800" y="524">
-    Solid lines: implemented streaming path • Dashed lines: planned Dagster + dbt path
+    Solid lines: implemented streaming + dbt Silver • Dashed lines: planned Dagster + Gold
   </text>
 </svg>
