@@ -7,8 +7,9 @@ scheduled analytics transformations.
 PostgreSQL is the operational source. Debezium captures committed changes,
 Kafka stores the CDC streams, Flink SQL parses and types the events, and
 BigQuery persists both append-only Bronze history and five-minute real-time
-order metrics. Dagster and dbt will own the scheduled transformations after
-Bronze.
+order metrics. dbt now resolves the Bronze CDC history into tested Silver
+current-state and order-history models. Dagster orchestration and the Gold
+analytics layer are the next milestones.
 
 ## Project status
 
@@ -22,7 +23,11 @@ Bronze.
 | Flink SQL typed CDC processing | Complete |
 | Four BigQuery Bronze CDC tables | Complete |
 | Five-minute event-derived order metrics | Complete |
-| Dagster + dbt Bronze to Silver to Gold processing | Planned |
+| Containerized dbt runtime and BigQuery sources | Complete |
+| dbt staging views and Silver models | Complete |
+| dbt data tests and reusable status macro | Complete |
+| BigQuery Gold dimensional and reporting models | Planned |
+| Dagster orchestration and scheduling | Planned |
 | Monitoring and infrastructure as code | Planned |
 
 ## Architecture
@@ -46,9 +51,11 @@ The components have intentionally separate responsibilities:
   store the Debezium `before` object.
 - **BigQuery Realtime** stores five-minute event-time order metrics produced by
   Flink.
-- **dbt** will resolve CDC history into current relational state, test it, and
-  build Silver and Gold analytical models.
-- **Dagster** will schedule, orchestrate, retry, and observe the dbt jobs.
+- **dbt** declares the Bronze sources, standardizes CDC events in staging
+  views, resolves current relational state, preserves order-status history,
+  and tests the resulting Silver models.
+- **Dagster** will later schedule, orchestrate, retry, and observe the dbt
+  jobs that build Silver and Gold.
 
 ## Data flow
 
@@ -58,8 +65,9 @@ PostgreSQL
     -> Kafka
     -> Flink SQL
     -> BigQuery Bronze + BigQuery Realtime
-    -> Dagster + dbt
-    -> BigQuery Silver + Gold
+    -> dbt
+    -> BigQuery Silver
+    -> planned: dbt Gold models + Dagster orchestration
 ```
 
 ### PostgreSQL to Kafka
@@ -111,7 +119,7 @@ each incoming event by:
 - creating a deterministic `cdc_event_id` from topic, partition, and offset.
 
 Bronze remains append-only. Updates and deletes are stored as new CDC event
-rows; dbt will later resolve the latest operation for each business key.
+rows; dbt resolves the latest operation for each business key in Silver.
 
 ### Event-derived metrics
 
@@ -141,6 +149,54 @@ Heartbeat-only windows are intentionally retained. They produce a zero order
 count and zero gross revenue, with a null average order value, proving that the
 stream is healthy even during periods without orders.
 
+## dbt transformation layer
+
+dbt runs as an ephemeral Docker Compose tool container. It authenticates to
+BigQuery through the same read-only Application Default Credentials mount used
+by Flink, uses BigQuery batch query priority, and writes the implemented models
+to `retail_silver`. The dbt commands are currently run manually; Dagster will
+orchestrate them in a later milestone.
+
+The implemented lineage is:
+
+```text
+retail_bronze.*_cdc sources
+    -> stg_customers_cdc       -> customers_current
+    -> stg_products_cdc        -> products_current
+    -> stg_orders_cdc          -> orders_current
+                               -> order_status_history
+    -> stg_order_items_cdc     -> order_items_current
+```
+
+| dbt resource | Materialization | Purpose |
+| --- | --- | --- |
+| Four `retail_bronze` sources | External BigQuery tables | Register the Flink-owned Bronze tables and establish lineage |
+| Four `stg_*_cdc` models | Views | Select business fields, expand CDC operation codes, identify deletes, and retain operational metadata |
+| Four `*_current` models | Tables | Resolve the latest non-deleted record for every business key |
+| `order_status_history` | Table | Preserve meaningful order-status changes and time spent in the previous state |
+
+The current-state models rank CDC events deterministically by
+`source_event_at`, `source_lsn`, and `kafka_offset`. They retain only the latest
+event for each business key and exclude keys whose latest event is a delete.
+The history model keeps initial states, actual status changes, and deletions
+while removing repeated events that do not change an order's status.
+
+The custom `normalize_order_status` macro trims and uppercases order statuses
+and maps the source value `PENDING` to the canonical value `PLACED`. It is used
+by both `orders_current` and `order_status_history`, keeping their business
+rules consistent.
+
+The project currently defines 51 data tests: 25 for staging and 26 for Silver.
+They validate event and business-key uniqueness, required fields, accepted CDC
+operations and order statuses, and relationships between customers, orders,
+products, and order items.
+
+Silver models are intentionally rebuilt as tables rather than implemented as
+incremental `MERGE` models. The project uses BigQuery Sandbox without billing,
+where DML-dependent incremental strategies and dbt snapshots cannot be
+executed. This keeps the demonstrated workflow reproducible without enabling
+paid features.
+
 ## Delivery and recovery
 
 All five outputs run in one long-lived Flink SQL Statement Set:
@@ -163,9 +219,10 @@ not business data and do not need to be replayed.
 ```text
 retail-data-platform/
 ├── dagster/                     # Planned dbt orchestration
-├── dbt/                         # Planned Silver and Gold models
+├── dbt/                         # Sources, staging/Silver models, tests, macros
 ├── dev/data/                    # Generated CSV files; ignored by Git
 ├── docker/
+│   ├── dbt/                     # Reproducible dbt Core + BigQuery image
 │   ├── flink/                   # Flink image, runtime config, dependencies
 │   ├── kafka/                   # CDC bootstrap image and Python requirements
 │   └── postgres/init/           # PostgreSQL source schema
@@ -191,6 +248,8 @@ retail-data-platform/
 | Apache Kafka | 4.0.0 |
 | Debezium Connect | 3.6.0.Final |
 | Apache Flink | 1.20.5, Scala 2.12, Java 17 |
+| dbt Core | 1.12.2 |
+| dbt BigQuery adapter | 1.12.0 |
 
 Flink 1.20.5 is used because it includes fixes required by this SQL Statement
 Set and connector combination.
@@ -289,6 +348,31 @@ SQL client exits.
 Open the Flink dashboard at [http://localhost:8081](http://localhost:8081) and
 confirm that the job and all five sink branches are running.
 
+### 7. Build and validate the dbt Silver layer
+
+Build the reproducible dbt image and verify its configuration and BigQuery
+connection:
+
+```bash
+docker compose build dbt
+docker compose run --rm dbt debug
+docker compose run --rm dbt ls --resource-type source
+```
+
+Build and test the staging views first, followed by the Silver tables:
+
+```bash
+docker compose run --rm dbt run --select path:models/staging
+docker compose run --rm dbt test --select path:models/staging
+
+docker compose run --rm dbt run --select path:models/silver
+docker compose run --rm dbt test --select path:models/silver
+```
+
+These commands create four staging views and five Silver tables in
+`retail_silver`, then execute the model-level data-quality and relationship
+tests. Each command uses a disposable container and exits when dbt finishes.
+
 ## Configuration reference
 
 | Variable | Purpose |
@@ -323,7 +407,10 @@ confirm that the job and all five sink branches are running.
 - [x] Load four append-only BigQuery Bronze tables
 - [x] Produce heartbeat-driven five-minute order metrics
 - [x] Configure checkpoint-backed exactly-once BigQuery delivery
-- [ ] Build incremental dbt Bronze to Silver models and tests
+- [x] Containerize dbt and declare the four BigQuery Bronze sources
+- [x] Build and test four CDC staging views
+- [x] Build and test four current-state Silver tables
+- [x] Preserve order-status history and centralize status normalization
 - [ ] Build dimensional and reporting models in BigQuery Gold
 - [ ] Orchestrate dbt jobs and quality checks with Dagster
 - [ ] Add production monitoring and Terraform infrastructure
