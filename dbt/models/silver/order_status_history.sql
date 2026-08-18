@@ -118,7 +118,7 @@ select
     created_at,
     updated_at,
 
-    cdc_event_id,
+    to_hex(md5(cdc_event_id)) as cdc_event_id,
     cdc_operation as cdc_operation_code,
     cdc_operation_name,
     source_lsn,

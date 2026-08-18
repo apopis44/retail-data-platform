@@ -34,3 +34,5 @@ models:
 
     gold:
       +materialized: table
+      +schema: retail_gold
+

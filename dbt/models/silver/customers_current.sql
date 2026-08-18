@@ -18,7 +18,7 @@ select
     first_name,
     last_name,
     email,
-    country,
+    country_name,
     created_at,
     updated_at,
 
@@ -33,4 +33,3 @@ from ranked_customer_events
 
 where event_rank = 1
     and not is_deleted
-

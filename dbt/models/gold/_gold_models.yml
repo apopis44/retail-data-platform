@@ -1,0 +1,195 @@
+version: 2
+
+models:
+  - name: dim_customers
+    description: Customer dimension containing one current row per customer.
+
+    columns:
+      - name: customer_id
+        description: Unique customer business identifier.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: full_name
+        description: Customer's combined first and last name.
+        data_tests:
+          - not_null
+
+      - name: country_name
+        description: Standardized customer country name.
+        data_tests:
+          - not_null
+
+  - name: dim_products
+    description: Product dimension containing one current row per product.
+
+    columns:
+      - name: product_id
+        description: Unique product business identifier.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: product_name
+        description: Product display name.
+        data_tests:
+          - not_null
+
+      - name: current_unit_price
+        description: Current selling price of the product.
+        data_tests:
+          - not_null
+
+  - name: fct_orders
+    description: Order-level fact containing one row per current order.
+
+    columns:
+      - name: order_id
+        description: Unique order business identifier.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: customer_id
+        description: Customer who placed the order.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+
+      - name: order_date
+        description: Calendar date on which the order was placed.
+        data_tests:
+          - not_null
+
+      - name: order_status
+        description: Current canonical order status.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - PLACED
+                  - PROCESSING
+                  - SHIPPED
+                  - DELIVERED
+                  - CANCELLED
+
+      - name: order_amount
+        description: Total monetary amount of the order.
+        data_tests:
+          - not_null
+
+  - name: fct_order_items
+    description: Order-item fact containing one row per line item.
+
+    columns:
+      - name: order_item_id
+        description: Unique order-item business identifier.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: order_id
+        description: Order containing the line item.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fct_orders')
+                field: order_id
+
+      - name: customer_id
+        description: Customer associated with the order.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+
+      - name: product_id
+        description: Product represented by the line item.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_products')
+                field: product_id
+
+      - name: quantity
+        description: Number of product units in the line item.
+        data_tests:
+          - not_null
+
+      - name: unit_price
+        description: Unit price recorded when the order was placed.
+        data_tests:
+          - not_null
+
+      - name: line_amount
+        description: Extended monetary amount of the line item.
+        data_tests:
+          - not_null
+
+  - name: fct_order_status_transitions
+    description: Order-status fact containing one row per captured transition.
+
+    columns:
+      - name: order_status_transition_id
+        description: Deterministic hashed identifier for the status transition.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: order_id
+        description: Order associated with the transition.
+        data_tests:
+          - not_null
+
+      - name: customer_id
+        description: Customer associated with the order.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+
+      - name: new_order_status
+        description: Status established by the transition.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - PLACED
+                  - PROCESSING
+                  - SHIPPED
+                  - DELIVERED
+                  - CANCELLED
+                  - DELETED
+
+      - name: transition_sequence
+        description: Position of the transition within the order lifecycle.
+        data_tests:
+          - not_null
+
+      - name: transition_type
+        description: Classification of the captured transition.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - initial_state
+                  - status_change
+                  - deletion
+
+      - name: status_started_at
+        description: Time at which the new status became effective.
+        data_tests:
+          - not_null
