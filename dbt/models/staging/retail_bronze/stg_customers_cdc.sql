@@ -3,7 +3,19 @@ select
     first_name,
     last_name,
     email,
-    country,
+
+    case upper(trim(country))
+        when 'US' then 'United States'
+        when 'CA' then 'Canada'
+        when 'IN' then 'India'
+        when 'AU' then 'Australia'
+        when 'GB' then 'United Kingdom'
+        when 'DE' then 'Germany'
+        when 'FR' then 'France'
+        when 'JP' then 'Japan'
+        else null
+    end as country_name,
+
     updated_at,
     created_at,
 
