@@ -1,2 +1,3 @@
 dbt-core==1.12.2
 dbt-bigquery==1.12.0
+dbt-metricflow==0.14.0
