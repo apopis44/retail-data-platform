@@ -10,8 +10,8 @@
     PostgreSQL changes flow through Debezium and Kafka into Flink SQL. Flink
     writes four typed CDC tables to BigQuery Bronze and five-minute order
     metrics to BigQuery Realtime. dbt transforms Bronze CDC history into
-    tested BigQuery Silver models. Dagster orchestration and dbt Gold models
-    are planned.
+    tested BigQuery Silver and Gold models, including a wide reporting table
+    and a 19-metric semantic layer. Dagster orchestration is planned.
   </desc>
 
   <defs>
@@ -75,7 +75,7 @@
 
   <text class="title" x="55" y="57">Retail data platform architecture</text>
   <text class="subtitle" x="55" y="87">
-    Streaming ingestion and dbt Silver implemented • Dagster orchestration and Gold next
+    Streaming, Silver, Gold, wide reporting, and semantic metrics implemented • Dagster next
   </text>
 
   <rect x="35" y="125" width="1530" height="310" rx="24"
@@ -140,9 +140,9 @@
 
   <rect x="35" y="470" width="1530" height="180" rx="24"
         fill="#0d1625" stroke="#334155" stroke-width="1.5"/>
-  <rect x="58" y="490" width="390" height="27" rx="13.5" fill="#164e63"/>
-  <text class="tag" x="253" y="508" text-anchor="middle" fill="#67e8f9">
-    DBT SILVER IMPLEMENTED • DAGSTER + GOLD PLANNED
+  <rect x="58" y="490" width="540" height="27" rx="13.5" fill="#164e63"/>
+  <text class="tag" x="328" y="508" text-anchor="middle" fill="#67e8f9">
+    DBT SILVER + GOLD + SEMANTIC METRICS IMPLEMENTED • DAGSTER PLANNED
   </text>
 
   <g filter="url(#shadow)">
@@ -171,34 +171,32 @@
     </text>
 
     <rect x="940" y="535" width="205" height="86" rx="15"
-          fill="#1c2738" stroke="#64748b" stroke-width="1.5"
-          stroke-dasharray="7 6"/>
+          fill="#18263a" stroke="#22d3ee" stroke-width="2"/>
     <text class="node-title" x="1042.5" y="567" text-anchor="middle">dbt Gold</text>
     <text class="node-subtitle" x="1042.5" y="596" text-anchor="middle">
       Dimensions and facts
     </text>
 
     <rect x="1230" y="535" width="245" height="86" rx="15"
-          fill="#17263d" stroke="#64748b" stroke-width="1.5"
-          stroke-dasharray="7 6"/>
+          fill="#17263d" stroke="#22d3ee" stroke-width="2"/>
     <text class="node-title" x="1352.5" y="567" text-anchor="middle">
       BigQuery Gold
     </text>
     <text class="node-subtitle" x="1352.5" y="596" text-anchor="middle">
-      Analytics and reporting
+      Dims • facts • wide • 19 metrics
     </text>
   </g>
 
   <path class="planned-flow" d="M 275 578 H 351"/>
   <path class="cyan-flow" d="M 565 578 H 641"/>
-  <path class="planned-flow" d="M 855 578 H 931"/>
-  <path class="planned-flow" d="M 1145 578 H 1221"/>
+  <path class="cyan-flow" d="M 855 578 H 931"/>
+  <path class="cyan-flow" d="M 1145 578 H 1221"/>
   <path class="cyan-flow" d="M 1520 236 H 1540 V 445 H 462 V 526"/>
   <text class="small" x="1080" y="460" text-anchor="middle">
     Bronze is the boundary between streaming ingestion and scheduled transformations
   </text>
 
   <text class="small" x="55" y="680">
-    Solid paths are implemented. Dashed paths represent planned Dagster and Gold work.
+    Solid paths are implemented. The dashed path represents planned Dagster orchestration.
   </text>
 </svg>
