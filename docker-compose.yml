@@ -243,7 +243,52 @@ services:
       - ./dbt:/app/dbt
       - ${GOOGLE_ADC_PATH:?GOOGLE_ADC_PATH must be set}:/run/secrets/gcp_adc:ro
 
+  dagster:
+    build:
+      context: .
+      dockerfile: docker/dagster/Dockerfile
+
+    image: retail-data-platform-dagster:1.13.18
+    container_name: retail-dagster
+    restart: unless-stopped
+
+    working_dir: /app/dagster
+
+    environment:
+      DAGSTER_HOME: /opt/dagster/dagster_home
+      DBT_PROJECT_DIR: /app/dbt
+      DBT_PROFILES_DIR: /app/dbt
+
+      DAGSTER_DBT_CRON: "${DAGSTER_DBT_CRON:-*/10 * * * *}"
+
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:?GOOGLE_CLOUD_PROJECT must be set}
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gcp_adc
+
+    ports:
+      - "3000:3000"
+
+    volumes:
+      - ./dagster:/app/dagster
+      - ./dbt:/app/dbt
+      - ${GOOGLE_ADC_PATH:?GOOGLE_ADC_PATH must be set}:/run/secrets/gcp_adc:ro
+      - dagster_home:/opt/dagster/dagster_home
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:3000/', timeout=5)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+
 volumes:
   postgres_data:
   kafka_data:
   flink_checkpoints:
+  dagster_home:

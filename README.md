@@ -10,8 +10,9 @@ BigQuery persists both append-only Bronze history and five-minute real-time
 order metrics. dbt now resolves the Bronze CDC history into tested Silver
 current-state and order-history models, then builds optimized Gold dimensions,
 facts, and a wide reporting table. A MetricFlow semantic layer exposes 19
-centrally defined metrics over those Gold models. Dagster orchestration is the
-next milestone.
+centrally defined metrics over those Gold models. Dagster orchestrates the
+complete dbt build-and-test workflow on a configurable UTC schedule and
+records asset lineage, retries, logs, and run history.
 
 ## Project status
 
@@ -31,12 +32,15 @@ next milestone.
 | BigQuery Gold dimensional models | Complete |
 | Wide order-item analytics table | Complete |
 | dbt Semantic Layer and MetricFlow metrics | Complete |
-| Dagster orchestration and scheduling | Planned |
+| Dagster orchestration and scheduling | Complete |
 | Monitoring and infrastructure as code | Planned |
 
 ## Architecture
 
 ![Retail data platform architecture](docs/new_flow.svg)
+
+The diagram predates the completed orchestration milestone: its dashed
+Dagster path is now implemented by the asset job documented below.
 
 The completed real-time ingestion path is shown in more detail below.
 
@@ -61,8 +65,9 @@ The components have intentionally separate responsibilities:
 - **MetricFlow** validates the semantic graph and dynamically compiles 19
   reusable business metrics into BigQuery SQL. Metric results are calculated
   on demand rather than stored in separate tables.
-- **Dagster** will later schedule, orchestrate, retry, and observe the dbt
-  jobs that build Silver and Gold.
+- **Dagster** schedules and observes the ordered dbt staging, Silver, and Gold
+  builds, then validates the MetricFlow semantic layer. It streams dbt output
+  into the run logs and stops downstream assets when an upstream layer fails.
 
 ## Data flow
 
@@ -72,13 +77,13 @@ PostgreSQL
     -> Kafka
     -> Flink SQL
     -> BigQuery Bronze + BigQuery Realtime
-    -> dbt
-    -> BigQuery Silver
-    -> dbt
-    -> BigQuery Gold
-    -> MetricFlow semantic queries
 
-planned: Dagster orchestration
+Dagster UTC schedule
+    -> dbt_staging: build and test staging views
+    -> dbt_silver: build and test Silver tables
+    -> dbt_gold: build and test Gold models
+    -> semantic_layer_validation: validate MetricFlow
+    -> MetricFlow semantic queries on demand
 ```
 
 ### PostgreSQL to Kafka
@@ -165,8 +170,9 @@ stream is healthy even during periods without orders.
 dbt runs as an ephemeral Docker Compose tool container. It authenticates to
 BigQuery through the same read-only Application Default Credentials mount used
 by Flink, uses BigQuery batch query priority, and writes the implemented models
-to `retail_silver` and `retail_gold`. The dbt commands are currently run
-manually; Dagster will orchestrate them in a later milestone.
+to `retail_silver` and `retail_gold`. The disposable dbt service remains
+available for development and targeted commands; scheduled full-pipeline runs
+are executed by the containerized Dagster service.
 
 The implemented lineage is:
 
@@ -303,6 +309,54 @@ Ratio metrics use the conventional decimal representation. For example,
 means `9.00%`. Presentation tools should multiply these values by 100 and add
 the percent sign.
 
+## Dagster orchestration layer
+
+Dagster models the batch transformation workflow as four ordered assets:
+
+```text
+dbt_staging
+    -> dbt_silver
+        -> dbt_gold
+            -> semantic_layer_validation
+```
+
+| Dagster asset | Command | Responsibility |
+| --- | --- | --- |
+| `dbt_staging` | `dbt build --select path:models/staging` | Build the four staging views and execute their tests |
+| `dbt_silver` | `dbt build --select path:models/silver` | Rebuild and test current-state and order-history tables |
+| `dbt_gold` | `dbt build --select path:models/gold` | Rebuild and test dimensions, facts, the wide table, and time spine |
+| `semantic_layer_validation` | `mf validate-configs` | Validate semantic models, entities, dimensions, measures, and metrics against BigQuery |
+
+The assets are selected by the `dbt_batch_pipeline` job and launched by
+`dbt_batch_pipeline_schedule`. The schedule reads `DAGSTER_DBT_CRON`, uses UTC,
+and is enabled when the code location loads. The tracked configuration uses a
+ten-minute test schedule; the intended production-style cadence is every 12
+hours:
+
+```ini
+# Testing
+DAGSTER_DBT_CRON="*/10 * * * *"
+
+# Every 12 hours at 00:00 and 12:00 UTC
+DAGSTER_DBT_CRON="0 */12 * * *"
+```
+
+Each asset retries once after 60 seconds. The shared command runner avoids
+shell interpretation, streams combined dbt output into Dagster logs, and
+raises structured Dagster failures with the command, working directory, and
+exit code. A failed layer prevents every downstream asset from running.
+
+The single local Dagster container includes the scheduler daemon and web UI.
+It mounts the dbt project, mounts Google Application Default Credentials
+read-only, and persists run metadata in the `dagster_home` named volume. This
+provides scheduled execution, layer-level lineage, run history, logs, retries,
+and failure visibility without changing the pinned dbt Core 1.12 runtime.
+
+The workflow was verified with live PostgreSQL status updates. Debezium and
+Flink appended the `u` events to Bronze, and subsequent scheduled Dagster runs
+updated Silver current state, preserved the status transitions, rebuilt the
+Gold current-state and wide models, and validated the semantic layer.
+
 ## Delivery and recovery
 
 All five outputs run in one long-lived Flink SQL Statement Set:
@@ -324,10 +378,11 @@ not business data and do not need to be replayed.
 
 ```text
 retail-data-platform/
-├── dagster/                     # Planned dbt orchestration
+├── dagster/                     # Dagster assets, batch job, and schedule
 ├── dbt/                         # Staging, Silver, Gold, tests, macros, metrics
 ├── dev/data/                    # Generated CSV files; ignored by Git
 ├── docker/
+│   ├── dagster/                 # Reproducible Dagster + dbt image
 │   ├── dbt/                     # Reproducible dbt Core + BigQuery image
 │   ├── flink/                   # Flink image, runtime config, dependencies
 │   ├── kafka/                   # CDC bootstrap image and Python requirements
@@ -357,6 +412,7 @@ retail-data-platform/
 | dbt Core | 1.12.2 |
 | dbt BigQuery adapter | 1.12.0 |
 | dbt MetricFlow | 0.14.0 |
+| Dagster and Dagster webserver | 1.13.18 |
 
 Flink 1.20.5 is used because it includes fixes required by this SQL Statement
 Set and connector combination.
@@ -547,6 +603,41 @@ docker compose run --rm --entrypoint mf dbt query \
 MetricFlow prints ratios as decimals: `0.0100` represents `1.00%`, while
 `0.0900` represents `9.00%`.
 
+### 10. Start the scheduled Dagster pipeline
+
+Build the pinned Dagster image and validate the code location:
+
+```bash
+docker compose build dagster
+
+docker compose run --rm --no-deps --entrypoint dagster dagster \
+  definitions validate \
+  --module-name retail_orchestration.definitions
+```
+
+Start the scheduler daemon and web UI:
+
+```bash
+docker compose up -d dagster
+docker compose ps dagster
+```
+
+Open [http://localhost:3000](http://localhost:3000). The Assets view shows the
+four-layer dependency graph, the Jobs view exposes `dbt_batch_pipeline`, and
+the schedule view shows `dbt_batch_pipeline_schedule` and its next UTC tick.
+Scheduled runs stream dbt and MetricFlow logs into the corresponding asset
+steps.
+
+After changing `DAGSTER_DBT_CRON`, recreate only the Dagster service so the new
+container receives the updated environment value:
+
+```bash
+docker compose config --quiet
+docker compose up -d --force-recreate dagster
+```
+
+The `dagster_home` volume preserves run history across recreation.
+
 ## Configuration reference
 
 | Variable | Purpose |
@@ -568,6 +659,7 @@ MetricFlow prints ratios as decimals: `0.0100` represents `1.00%`, while
 | `POSTGRES_REPLICATION_SLOT_NAME` | Debezium replication slot |
 | `GOOGLE_CLOUD_PROJECT` | BigQuery project ID |
 | `GOOGLE_ADC_PATH` | Host path to the ADC JSON file mounted read-only |
+| `DAGSTER_DBT_CRON` | UTC cron expression for the scheduled dbt batch pipeline |
 
 ## Roadmap
 
@@ -589,7 +681,7 @@ MetricFlow prints ratios as decimals: `0.0100` represents `1.00%`, while
 - [x] Build a partitioned and clustered wide order-item reporting table
 - [x] Define and validate four semantic models and 19 MetricFlow metrics
 - [x] Add a tested daily time spine for time-based metric queries
-- [ ] Orchestrate dbt jobs and quality checks with Dagster
+- [x] Orchestrate dbt builds, tests, and semantic validation with Dagster
 - [ ] Add production monitoring and Terraform infrastructure
 
 ## License
