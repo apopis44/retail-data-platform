@@ -1,0 +1,17 @@
+retail_data_platform:
+  target: dev
+
+  outputs:
+    dev:
+      type: bigquery
+      method: oauth
+
+      project: "{{ env_var('GOOGLE_CLOUD_PROJECT') }}"
+      dataset: retail_silver
+      location: US
+
+      threads: 4
+      priority: batch
+
+      job_execution_timeout_seconds: 300
+      job_retries: 1

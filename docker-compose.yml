@@ -1,3 +1,10 @@
+x-flink-image: &flink-image
+  build:
+    context: .
+    dockerfile: docker/flink/Dockerfile
+  image: retail-data-platform-flink:1.20.5
+
+
 services:
 
   postgres:
@@ -15,9 +22,9 @@ services:
       - max_wal_senders=10
 
     environment:
-      POSTGRES_DB: retail
-      POSTGRES_USER: retail_user
-      POSTGRES_PASSWORD: retail_password
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
 
     ports:
       - "5432:5432"
@@ -27,7 +34,11 @@ services:
       - ./docker/postgres/init:/docker-entrypoint-initdb.d
 
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U retail_user -d retail"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -74,7 +85,7 @@ services:
       start_period: 10s
 
   debezium:
-    image: quay.io/debezium/connect:latest
+    image: quay.io/debezium/connect:3.6.0.Final
     container_name: retail-debezium
     restart: unless-stopped
     depends_on:
@@ -87,12 +98,16 @@ services:
       - "8083:8083"
 
     environment:
-      BOOTSTRAP_SERVERS: kafka:29092
+      BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?KAFKA_BOOTSTRAP_SERVERS must be set}
       GROUP_ID: 1
 
       CONFIG_STORAGE_TOPIC: debezium_configs
       OFFSET_STORAGE_TOPIC: debezium_offsets
       STATUS_STORAGE_TOPIC: debezium_status
+
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
 
       KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
       VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
@@ -102,8 +117,55 @@ services:
 
       CONNECT_REST_ADVERTISED_HOST_NAME: debezium
 
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl --fail --silent http://localhost:8083/connectors > /dev/null",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  cdc-bootstrap:
+    build:
+      context: .
+      dockerfile: docker/kafka/Dockerfile
+
+    container_name: retail-cdc-bootstrap
+    restart: "no"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      debezium:
+        condition: service_healthy
+
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST:?POSTGRES_HOST must be set}
+      POSTGRES_PORT: ${POSTGRES_PORT:?POSTGRES_PORT must be set}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?KAFKA_BOOTSTRAP_SERVERS must be set}
+      KAFKA_TOPIC_PREFIX: ${KAFKA_TOPIC_PREFIX:-retail}
+      KAFKA_TOPIC_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS:-3}
+      KAFKA_TOPIC_REPLICATION_FACTOR: ${KAFKA_TOPIC_REPLICATION_FACTOR:-1}
+
+      DEBEZIUM_URL: ${DEBEZIUM_URL:?DEBEZIUM_URL must be set}
+      DEBEZIUM_CONNECTOR_NAME: ${DEBEZIUM_CONNECTOR_NAME:-postgres-retail-cdc}
+      DEBEZIUM_HEARTBEAT_TOPIC: ${DEBEZIUM_HEARTBEAT_TOPIC:?DEBEZIUM_HEARTBEAT_TOPIC must be set}
+      DEBEZIUM_HEARTBEAT_INTERVAL_MS: ${DEBEZIUM_HEARTBEAT_INTERVAL_MS:?DEBEZIUM_HEARTBEAT_INTERVAL_MS must be set}
+
+      POSTGRES_PUBLICATION_NAME: ${POSTGRES_PUBLICATION_NAME:-retail_cdc}
+      POSTGRES_REPLICATION_SLOT_NAME: ${POSTGRES_REPLICATION_SLOT_NAME:-retail_cdc_slot}
+
   flink-jobmanager:
-    image: flink:1.20.1-scala_2.12-java17
+    <<: *flink-image
     container_name: retail-flink-jobmanager
     restart: unless-stopped
     command: jobmanager
@@ -111,11 +173,19 @@ services:
     ports:
       - "8081:8081"
 
+    env_file:
+      - ./docker/flink/flink.env
+
     environment:
-      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager"
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?KAFKA_BOOTSTRAP_SERVERS must be set}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:?GOOGLE_CLOUD_PROJECT must be set}
+      DEBEZIUM_HEARTBEAT_TOPIC: ${DEBEZIUM_HEARTBEAT_TOPIC:?DEBEZIUM_HEARTBEAT_TOPIC must be set}
 
     volumes:
       - ./flink/jobs:/opt/flink/jobs
+      - ./flink-sql:/opt/flink/sql:ro
+      - ${GOOGLE_ADC_PATH:?GOOGLE_ADC_PATH must be set}:/run/secrets/gcp_adc:ro
+      - flink_checkpoints:/opt/flink/checkpoints
 
     healthcheck:
       test: ["CMD-SHELL",
@@ -127,19 +197,23 @@ services:
       start_period: 20s
 
   flink-taskmanager:
-    image: flink:1.20.1-scala_2.12-java17
+    environment:
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:?GOOGLE_CLOUD_PROJECT must be set}
+    <<: *flink-image
     container_name: retail-flink-taskmanager
     restart: unless-stopped
     command: taskmanager
-    depends_on: 
+    depends_on:
       flink-jobmanager:
         condition: service_healthy
 
-    environment:
-      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager\ntaskmanager.numberOfTaskSlots: 2"
+    env_file:
+      - ./docker/flink/flink.env
 
-    volumes: 
+    volumes:
       - ./flink/jobs:/opt/flink/jobs
+      - ${GOOGLE_ADC_PATH:?GOOGLE_ADC_PATH must be set}:/run/secrets/gcp_adc:ro
+      - flink_checkpoints:/opt/flink/checkpoints
 
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f 'org.apache.flink.runtime.taskexecutor.TaskManagerRunner' > /dev/null || exit 1"]
@@ -149,6 +223,72 @@ services:
       start_period: 30s
 
 
+  dbt:
+    build:
+      context: .
+      dockerfile: docker/dbt/Dockerfile
+
+    image: retail-data-platform-dbt:1.12.2
+
+    profiles:
+      - tools
+
+    working_dir: /app/dbt
+
+    environment:
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:?GOOGLE_CLOUD_PROJECT must be set}
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gcp_adc
+
+    volumes:
+      - ./dbt:/app/dbt
+      - ${GOOGLE_ADC_PATH:?GOOGLE_ADC_PATH must be set}:/run/secrets/gcp_adc:ro
+
+  dagster:
+    build:
+      context: .
+      dockerfile: docker/dagster/Dockerfile
+
+    image: retail-data-platform-dagster:1.13.18
+    container_name: retail-dagster
+    restart: unless-stopped
+
+    working_dir: /app/dagster
+
+    environment:
+      DAGSTER_HOME: /opt/dagster/dagster_home
+      DBT_PROJECT_DIR: /app/dbt
+      DBT_PROFILES_DIR: /app/dbt
+
+      DAGSTER_DBT_CRON: "${DAGSTER_DBT_CRON:-*/10 * * * *}"
+
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:?GOOGLE_CLOUD_PROJECT must be set}
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gcp_adc
+
+    ports:
+      - "3000:3000"
+
+    volumes:
+      - ./dagster:/app/dagster
+      - ./dbt:/app/dbt
+      - ${GOOGLE_ADC_PATH:?GOOGLE_ADC_PATH must be set}:/run/secrets/gcp_adc:ro
+      - dagster_home:/opt/dagster/dagster_home
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:3000/', timeout=5)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+
 volumes:
   postgres_data:
   kafka_data:
+  flink_checkpoints:
+  dagster_home:

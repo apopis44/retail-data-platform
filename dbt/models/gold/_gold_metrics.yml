@@ -1,0 +1,16 @@
+version: 2
+
+metrics:
+  - name: cancellation_rate
+    description: Proportion of current orders whose status is CANCELLED
+    label: Cancellation Rate
+    type: ratio
+    numerator: cancelled_order_count
+    denominator: order_count
+
+  - name: delivery_rate
+    description: Proportion of current orders whose status is DELIVERED.
+    label: Delivery Rate
+    type: ratio
+    numerator: delivered_order_count
+    denominator: order_count

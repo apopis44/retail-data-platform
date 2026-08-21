@@ -1,0 +1,471 @@
+version: 2
+
+models:
+  - name: dim_customers
+    description: Customer dimension containing one current row per customer.
+
+    semantic_model:
+      enabled: true
+
+    agg_time_dimension: customer_since_date
+
+    columns:
+      - name: customer_id
+        description: Unique customer business identifier.
+        entity:
+          type: primary
+          name: customer
+        data_tests:
+          - not_null
+          - unique
+
+      - name: full_name
+        description: Customer's combined first and last name.
+        dimension:
+          type: categorical
+        data_tests:
+          - not_null
+
+      - name: country_name
+        description: Standardized customer country name.
+        dimension:
+          type: categorical
+        data_tests:
+          - not_null
+
+      - name: customer_since_date
+        description: Calendar date on which the customer was created.
+        granularity: day
+        dimension:
+          type: time
+
+  - name: dim_products
+    description: Product dimension containing one current row per product.
+
+    semantic_model:
+      enabled: true
+
+    agg_time_dimension: product_created_date
+
+    columns:
+      - name: product_id
+        description: Unique product business identifier.
+        entity:
+          type: primary
+          name: product
+        data_tests:
+          - not_null
+          - unique
+
+      - name: product_name
+        description: Product display name.
+        dimension:
+          type: categorical
+        data_tests:
+          - not_null
+
+      - name: product_category
+        description: Standardized product category.
+        dimension:
+          type: categorical
+        data_tests:
+          - not_null
+
+      - name: current_unit_price
+        description: Current selling price of the product.
+        data_tests:
+          - not_null
+
+      - name: product_created_date
+        description: Calendar date on which the product was created.
+        granularity: day
+        dimension:
+          type: time
+
+  - name: fct_orders
+    description: Order-level fact containing one row per current order.
+
+    semantic_model:
+      enabled: true
+
+    agg_time_dimension: order_date
+
+    columns:
+      - name: order_id
+        description: Unique order business identifier.
+        entity:
+          type: primary
+          name: retail_order
+        data_tests:
+          - not_null
+          - unique
+
+      - name: customer_id
+        description: Customer who placed the order.
+        entity:
+          type: foreign
+          name: customer
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+
+      - name: order_date
+        description: Calendar date on which the order was placed.
+        granularity: day
+        dimension:
+          type: time
+        data_tests:
+          - not_null
+
+      - name: order_status
+        description: Current canonical order status.
+        dimension:
+          type: categorical
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - PLACED
+                  - PROCESSING
+                  - SHIPPED
+                  - DELIVERED
+                  - CANCELLED
+
+      - name: order_amount
+        description: Total monetary amount of the order.
+        data_tests:
+          - not_null
+
+      - name: is_cancelled
+        description: Indicates whether the current order status is CANCELLED.
+        dimension:
+          type: categorical
+
+      - name: is_delivered
+        description: Indicates whether the current order status is DELIVERED.
+        dimension:
+          type: categorical
+
+    metrics:
+      - name: order_count
+        description: Number of current orders.
+        label: Order Count
+        type: simple
+        agg: count
+        expr: 1
+        fill_nulls_with: 0
+
+      - name: distinct_customer_count
+        description: Number of distinct customers who placed orders.
+        label: Distinct Customer Count
+        type: simple
+        agg: count_distinct
+        expr: customer_id
+        fill_nulls_with: 0
+
+      - name: gross_order_value
+        description: Total value of all orders, including cancelled orders.
+        label: Gross Order Value
+        type: simple
+        agg: sum
+        expr: order_amount
+        fill_nulls_with: 0
+
+      - name: non_cancelled_order_value
+        description: Total value of orders whose current status is not CANCELLED.
+        label: Non-Cancelled Order Value
+        type: simple
+        agg: sum
+        expr: order_amount
+        fill_nulls_with: 0
+        filter: |
+          {{ Dimension('retail_order__order_status') }} != 'CANCELLED'
+
+      - name: average_non_cancelled_order_value
+        description: Average value of orders whose current status is not CANCELLED.
+        label: Average Non-Cancelled Order Value
+        type: simple
+        agg: average
+        expr: order_amount
+        filter: |
+          {{ Dimension('retail_order__order_status') }} != 'CANCELLED'
+
+      - name: processing_order_count
+        description: Number of orders whose current status is PROCESSING.
+        label: Processing Order Count
+        type: simple
+        agg: count
+        expr: 1
+        fill_nulls_with: 0
+        filter: |
+          {{ Dimension('retail_order__order_status') }} = 'PROCESSING'
+
+      - name: processing_order_value
+        description: Total value of orders whose current status is PROCESSING.
+        label: Processing Order Value
+        type: simple
+        agg: sum
+        expr: order_amount
+        fill_nulls_with: 0
+        filter: |
+          {{ Dimension('retail_order__order_status') }} = 'PROCESSING'
+
+      - name: shipped_order_count
+        description: Number of orders whose current status is SHIPPED.
+        label: Shipped Order Count
+        type: simple
+        agg: count
+        expr: 1
+        fill_nulls_with: 0
+        filter: |
+          {{ Dimension('retail_order__order_status') }} = 'SHIPPED'
+
+      - name: shipped_order_value
+        description: Total value of orders whose current status is SHIPPED.
+        label: Shipped Order Value
+        type: simple
+        agg: sum
+        expr: order_amount
+        fill_nulls_with: 0
+        filter: |
+          {{ Dimension('retail_order__order_status') }} = 'SHIPPED'
+
+      - name: delivered_order_count
+        description: Number of orders whose current status is DELIVERED.
+        label: Delivered Order Count
+        type: simple
+        agg: count
+        expr: 1
+        fill_nulls_with: 0
+        filter: |
+          {{ Dimension('retail_order__order_status') }} = 'DELIVERED'
+
+      - name: cancelled_order_count
+        description: Number of orders whose current status is CANCELLED.
+        label: Cancelled Order Count
+        type: simple
+        agg: count
+        expr: 1
+        fill_nulls_with: 0
+        filter: |
+          {{ Dimension('retail_order__order_status') }} = 'CANCELLED'
+
+  - name: fct_order_items
+    description: Order-item fact containing one row per line item.
+
+    semantic_model:
+      enabled: true
+
+    agg_time_dimension: order_date
+
+    columns:
+      - name: order_item_id
+        description: Unique order-item business identifier.
+        entity:
+          type: primary
+          name: order_item
+        data_tests:
+          - not_null
+          - unique
+
+      - name: order_id
+        description: Order containing the line item.
+        entity:
+          type: foreign
+          name: retail_order
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fct_orders')
+                field: order_id
+
+      - name: customer_id
+        description: Customer associated with the order.
+        entity:
+          type: foreign
+          name: customer
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+
+      - name: product_id
+        description: Product represented by the line item.
+        entity:
+          type: foreign
+          name: product
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_products')
+                field: product_id
+
+      - name: order_date
+        description: Calendar date on which the containing order was placed.
+        granularity: day
+        dimension:
+          type: time
+        data_tests:
+          - not_null
+
+      - name: order_status
+        description: Current canonical status of the containing order.
+        dimension:
+          type: categorical
+        data_tests:
+          - not_null
+
+      - name: quantity
+        description: Number of product units in the line item.
+        data_tests:
+          - not_null
+
+      - name: unit_price
+        description: Unit price recorded when the order was placed.
+        data_tests:
+          - not_null
+
+      - name: line_amount
+        description: Extended monetary amount of the line item.
+        data_tests:
+          - not_null
+
+    metrics:
+      - name: line_item_count
+        description: Number of order line items.
+        label: Line Item Count
+        type: simple
+        agg: count
+        expr: 1
+        fill_nulls_with: 0
+
+      - name: non_cancelled_units
+        description: Product units belonging to orders not currently cancelled.
+        label: Non-Cancelled Units
+        type: simple
+        agg: sum
+        expr: quantity
+        fill_nulls_with: 0
+        filter: |
+          {{ Dimension('order_item__order_status') }} != 'CANCELLED'
+
+      - name: delivered_units
+        description: Product units belonging to delivered orders.
+        label: Delivered Units
+        type: simple
+        agg: sum
+        expr: quantity
+        fill_nulls_with: 0
+        filter: |
+          {{ Dimension('order_item__order_status') }} = 'DELIVERED'
+
+      - name: product_order_value
+        description: Line-item value belonging to orders not currently cancelled.
+        label: Product Order Value
+        type: simple
+        agg: sum
+        expr: line_amount
+        fill_nulls_with: 0
+        filter: |
+          {{ Dimension('order_item__order_status') }} != 'CANCELLED'
+
+      - name: product_order_count
+        description: Distinct non-cancelled orders containing products.
+        label: Product Order Count
+        type: simple
+        agg: count_distinct
+        expr: order_id
+        fill_nulls_with: 0
+        filter: |
+          {{ Dimension('order_item__order_status') }} != 'CANCELLED'
+
+      - name: product_customer_count
+        description: Distinct customers with non-cancelled product orders.
+        label: Product Customer Count
+        type: simple
+        agg: count_distinct
+        expr: customer_id
+        fill_nulls_with: 0
+        filter: |
+          {{ Dimension('order_item__order_status') }} != 'CANCELLED'
+
+  - name: fct_order_status_transitions
+    description: Order-status fact containing one row per captured transition.
+
+    columns:
+      - name: order_status_transition_id
+        description: Deterministic hashed identifier for the status transition.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: order_id
+        description: Order associated with the transition.
+        data_tests:
+          - not_null
+
+      - name: customer_id
+        description: Customer associated with the order.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+
+      - name: new_order_status
+        description: Status established by the transition.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - PLACED
+                  - PROCESSING
+                  - SHIPPED
+                  - DELIVERED
+                  - CANCELLED
+                  - DELETED
+
+      - name: transition_sequence
+        description: Position of the transition within the order lifecycle.
+        data_tests:
+          - not_null
+
+      - name: transition_type
+        description: Classification of the captured transition.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - initial_state
+                  - status_change
+                  - deletion
+
+      - name: status_started_at
+        description: Time at which the new status became effective.
+        data_tests:
+          - not_null
+
+  - name: time_spine_daily
+    description: Daily calendar spine used by MetricFlow for time-based metric queries.
+
+    time_spine:
+      standard_granularity_column: date_day
+
+    columns:
+      - name: date_day
+        description: One unique calendar date at daily granularity.
+        granularity: day
+        data_tests:
+          - not_null
+          - unique
