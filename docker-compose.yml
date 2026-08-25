@@ -228,7 +228,7 @@ services:
       context: .
       dockerfile: docker/dbt/Dockerfile
 
-    image: retail-data-platform-dbt:1.12.2
+    image: retail-data-platform-dbt:1.12.3
 
     profiles:
       - tools
@@ -264,7 +264,7 @@ services:
       context: .
       dockerfile: docker/dagster/Dockerfile
 
-    image: retail-data-platform-dagster:1.13.18
+    image: retail-data-platform-dagster:1.13.19
     container_name: retail-dagster
     restart: unless-stopped
 

@@ -1,2 +1,3 @@
-# PostgreSQL snapshot ingestion
+# Local data generation and PostgreSQL ingestion
+Faker==40.37.0
 psycopg[binary]==3.3.4
