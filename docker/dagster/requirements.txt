@@ -1,5 +1,5 @@
-dagster==1.13.18
-dagster-webserver==1.13.18
-dbt-core==1.12.2
+dagster==1.13.19
+dagster-webserver==1.13.19
+dbt-core==1.12.3
 dbt-bigquery==1.12.0
 dbt-metricflow==0.14.0
