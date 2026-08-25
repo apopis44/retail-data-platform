@@ -223,3 +223,20 @@ dbt/target/
 dbt/logs/
 dbt/dbt_packages/
 dbt/.user.yml
+
+# Terraform local files
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.tfstate.lock.info
+.terraformrc
+terraform.rc
