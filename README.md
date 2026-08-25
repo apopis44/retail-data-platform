@@ -14,6 +14,11 @@ centrally defined metrics over those Gold models. Dagster orchestrates the
 complete dbt build-and-test workflow on a configurable UTC schedule and
 records asset lineage, retries, logs, and run history.
 
+Terraform adopts and protects the four existing BigQuery datasets, assigns
+consistent metadata and Sandbox-compatible expiration settings, and provisions
+separate least-privilege service accounts for Flink and dbt/Dagster. Terraform
+runs from a pinned Docker image, so no host installation is required.
+
 ## Project status
 
 | Capability | Status |
@@ -33,7 +38,9 @@ records asset lineage, retries, logs, and run history.
 | Wide order-item analytics table | Complete |
 | dbt Semantic Layer and MetricFlow metrics | Complete |
 | Dagster orchestration and scheduling | Complete |
-| Monitoring and infrastructure as code | Planned |
+| Terraform-managed BigQuery datasets | Complete |
+| Least-privilege GCP service accounts and IAM | Complete |
+| Production monitoring | Planned |
 
 ## Architecture
 
@@ -68,6 +75,9 @@ The components have intentionally separate responsibilities:
 - **Dagster** schedules and observes the ordered dbt staging, Silver, and Gold
   builds, then validates the MetricFlow semantic layer. It streams dbt output
   into the run logs and stops downstream assets when an upstream layer fails.
+- **Terraform** manages the existing BigQuery datasets, their lifecycle
+  protections and metadata, and additive least-privilege IAM grants for the
+  Flink and dbt/Dagster workload identities.
 
 ## Data flow
 
@@ -84,6 +94,11 @@ Dagster UTC schedule
     -> dbt_gold: build and test Gold models
     -> semantic_layer_validation: validate MetricFlow
     -> MetricFlow semantic queries on demand
+
+Terraform control plane
+    -> adopt and protect four existing BigQuery datasets
+    -> provision Flink and dbt/Dagster service accounts
+    -> grant additive dataset- and project-scoped IAM roles
 ```
 
 ### PostgreSQL to Kafka
@@ -374,6 +389,52 @@ The four business sources start from their Kafka consumer-group offsets. The
 heartbeat source starts at the latest offset because historical heartbeats are
 not business data and do not need to be replayed.
 
+## Infrastructure as Code and IAM
+
+Terraform runs as an ephemeral Docker Compose tool using the pinned
+`hashicorp/terraform:1.15.9` image and Google provider `7.45.0`. The tool mounts
+only the `terraform` directory and the existing Application Default
+Credentials file. The credential is read-only and remains outside Git.
+
+The configuration adopts the four existing BigQuery datasets through
+declarative import blocks:
+
+- `retail_bronze`
+- `retail_realtime`
+- `retail_silver`
+- `retail_gold`
+
+One reusable `for_each` resource manages their US location, 60-day Sandbox
+table and partition expiration, friendly names, descriptions, and consistent
+`data_layer`, `environment`, and `managed_by` labels. Both Terraform lifecycle
+protection and provider deletion protection prevent accidental dataset
+destruction. Existing dataset access entries are preserved, and all new IAM
+permissions use additive member resources rather than authoritative policies.
+
+Terraform provisions two user-managed service accounts without creating
+long-lived JSON keys:
+
+| Workload identity | Scope | Role | Purpose |
+| --- | --- | --- | --- |
+| `retail-flink-writer` | `retail_bronze` | BigQuery Data Editor | Create and write typed CDC tables |
+| `retail-flink-writer` | `retail_realtime` | BigQuery Data Editor | Create and write event-derived metric tables |
+| `retail-dbt-transformer` | `retail_bronze` | BigQuery Data Viewer | Read immutable Bronze source events |
+| `retail-dbt-transformer` | `retail_silver` | BigQuery Data Editor | Build and test Silver models |
+| `retail-dbt-transformer` | `retail_gold` | BigQuery Data Editor | Build, test, and query Gold models |
+| `retail-dbt-transformer` | GCP project | BigQuery Job User | Create BigQuery query jobs |
+
+Dagster invokes dbt and therefore shares the dbt transformation identity in a
+deployed environment. The local Docker environment continues to use the
+developer's mounted ADC credential; the service accounts model the
+production-style permission boundary without placing private keys in the
+repository or Terraform state.
+
+Terraform currently uses local state because the project runs without a
+billing account. `terraform.tfstate`, backup state, downloaded providers,
+variable files, and saved plans are ignored by Git. Preserve the local state
+file and never commit or share it. A shared production deployment should move
+state to an encrypted remote backend with locking.
+
 ## Repository structure
 
 ```text
@@ -391,10 +452,10 @@ retail-data-platform/
 ├── flink/jobs/                  # Flink pipeline submission script
 ├── flink-sql/                   # Sources, views, sinks, and Statement Set
 ├── kafka/                       # Idempotent CDC bootstrap package
-├── monitoring/                  # Planned observability configuration
+├── monitoring/                  # Planned production monitoring configuration
 ├── scripts/                     # Synthetic data generator
 ├── src/ingestion/               # Snapshot load and validation
-├── terraform/                   # Planned cloud infrastructure
+├── terraform/                   # BigQuery datasets, service accounts, and IAM
 ├── tests/                       # Automated test area
 ├── docker-compose.yml           # Local data-platform services
 └── requirements.txt             # Local snapshot-ingestion dependency
@@ -413,6 +474,8 @@ retail-data-platform/
 | dbt BigQuery adapter | 1.12.0 |
 | dbt MetricFlow | 0.14.0 |
 | Dagster and Dagster webserver | 1.13.18 |
+| Terraform CLI | 1.15.9 |
+| Terraform Google provider | 7.45.0 |
 
 Flink 1.20.5 is used because it includes fixes required by this SQL Statement
 Set and connector combination.
@@ -427,6 +490,11 @@ Set and connector combination.
 - A GCP project with BigQuery enabled
 - BigQuery datasets named `retail_bronze`, `retail_realtime`,
   `retail_silver`, and `retail_gold`
+- Permission to manage those datasets, create service accounts, and add IAM
+  members in the selected GCP project
+
+Terraform itself does not need to be installed on the host. Docker Compose
+uses the pinned official image.
 
 ### 1. Configure the environment
 
@@ -446,7 +514,46 @@ Create local Application Default Credentials if they do not already exist:
 gcloud auth application-default login
 ```
 
-### 2. Create the Python environment
+### 2. Adopt and protect the GCP infrastructure
+
+Validate Compose, initialize the pinned provider, and check the Terraform
+configuration:
+
+```bash
+docker compose config --quiet
+docker compose run --rm terraform init
+docker compose run --rm terraform fmt -check
+docker compose run --rm terraform validate
+```
+
+The checked-in import blocks adopt the four datasets that already exist in the
+project. Save and inspect the exact plan before applying it:
+
+```bash
+docker compose run --rm terraform plan -out=plan.tfplan
+docker compose run --rm terraform show -no-color plan.tfplan
+docker compose run --rm terraform apply plan.tfplan
+rm -f -- terraform/plan.tfplan
+```
+
+The initial apply imports the datasets, applies safe metadata and deletion
+protection, creates the two keyless service accounts, and adds six
+least-privilege IAM memberships. It does not recreate datasets or tables.
+Never apply a plan that unexpectedly replaces or destroys a dataset.
+
+Confirm that the real infrastructure matches the configuration and display
+the managed datasets:
+
+```bash
+docker compose run --rm terraform plan -detailed-exitcode
+docker compose run --rm terraform output bigquery_datasets
+```
+
+An exit code of `0` means Terraform detected no drift. Exit code `2` means the
+plan contains changes that must be reviewed; any other nonzero code is an
+error.
+
+### 3. Create the Python environment
 
 ```bash
 python3.12 -m venv .venv
@@ -455,7 +562,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-### 3. Generate the source data
+### 4. Generate the source data
 
 ```bash
 python scripts/generate_data.py --output dev/data
@@ -463,7 +570,7 @@ python scripts/generate_data.py --output dev/data
 
 Generation is deterministic with the default random seed of `42`.
 
-### 4. Start PostgreSQL and load the snapshot
+### 5. Start PostgreSQL and load the snapshot
 
 ```bash
 docker compose up -d postgres
@@ -479,7 +586,7 @@ after every validation succeeds. Docker Compose reads `.env` automatically;
 the shell export above makes the same values available to the local Python
 process while overriding the container-only hostname.
 
-### 5. Start CDC and Flink
+### 6. Start CDC and Flink
 
 ```bash
 docker compose up --build -d \
@@ -497,7 +604,7 @@ docker compose logs cdc-bootstrap
 The persistent services remain running after `cdc-bootstrap` exits with code
 zero.
 
-### 6. Submit the Flink SQL pipeline
+### 7. Submit the Flink SQL pipeline
 
 ```bash
 docker compose exec flink-jobmanager \
@@ -511,7 +618,7 @@ SQL client exits.
 Open the Flink dashboard at [http://localhost:8081](http://localhost:8081) and
 confirm that the job and all five sink branches are running.
 
-### 7. Build and validate the dbt Silver layer
+### 8. Build and validate the dbt Silver layer
 
 Build the reproducible dbt image and verify its configuration and BigQuery
 connection:
@@ -536,7 +643,7 @@ These commands create four staging views and five Silver tables in
 `retail_silver`, then execute the model-level data-quality and relationship
 tests. Each command uses a disposable container and exits when dbt finishes.
 
-### 8. Build Gold and validate the semantic layer
+### 9. Build Gold and validate the semantic layer
 
 Build and test the Gold dimensions, facts, wide table, and daily time spine:
 
@@ -561,7 +668,7 @@ measures, and metrics:
 docker compose run --rm --entrypoint mf dbt validate-configs
 ```
 
-### 9. Query metrics from the CLI
+### 10. Query metrics from the CLI
 
 List available metrics or inspect the dimensions available to a metric:
 
@@ -603,7 +710,7 @@ docker compose run --rm --entrypoint mf dbt query \
 MetricFlow prints ratios as decimals: `0.0100` represents `1.00%`, while
 `0.0900` represents `9.00%`.
 
-### 10. Start the scheduled Dagster pipeline
+### 11. Start the scheduled Dagster pipeline
 
 Build the pinned Dagster image and validate the code location:
 
@@ -661,6 +768,10 @@ The `dagster_home` volume preserves run history across recreation.
 | `GOOGLE_ADC_PATH` | Host path to the ADC JSON file mounted read-only |
 | `DAGSTER_DBT_CRON` | UTC cron expression for the scheduled dbt batch pipeline |
 
+The Terraform Compose service maps `GOOGLE_CLOUD_PROJECT` to the Terraform
+input `project_id` through `TF_VAR_project_id`. The BigQuery location defaults
+to `US` in `terraform/variables.tf`.
+
 ## Roadmap
 
 - [x] Generate deterministic retail source data
@@ -682,7 +793,9 @@ The `dagster_home` volume preserves run history across recreation.
 - [x] Define and validate four semantic models and 19 MetricFlow metrics
 - [x] Add a tested daily time spine for time-based metric queries
 - [x] Orchestrate dbt builds, tests, and semantic validation with Dagster
-- [ ] Add production monitoring and Terraform infrastructure
+- [x] Adopt and protect four BigQuery datasets with Terraform
+- [x] Provision keyless workload identities and least-privilege additive IAM
+- [ ] Add production monitoring
 
 ## License
 
